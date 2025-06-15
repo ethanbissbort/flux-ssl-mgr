@@ -121,6 +121,7 @@ show_usage() {
     echo "  hostname           - The hostname identifier (will create <hostname>.fluxlab.systems)"
     echo "  ip-address         - The primary IP address for Subject Alternative Name"
     echo "  additional-sans    - Optional additional SAN entries (format: TYPE:value)"
+    echo "  Remote execution:     curl -sSL https://raw.githubusercontent.com/ethanbissbort/flux-ssl-mgr/main/flux-ssl-mgr.sh | bash -s -- <hostname> <ip-address> [additional-sans...]"
     echo
     echo "SAN Types:"
     echo "  DNS:domain.com     - Additional DNS names"
@@ -153,7 +154,7 @@ if [[ $# -eq 0 ]]; then
     
     # Prompt for hostname/identifier
     while true; do
-        read -p "Enter the hostname/identifier to replace TEMPLATE: " hostname
+        read -p "Enter the hostname/identifier: " hostname
         if [[ -n "$hostname" ]] && validate_hostname "$hostname"; then
             break
         else
@@ -163,7 +164,7 @@ if [[ $# -eq 0 ]]; then
 
     # Prompt for IP address
     while true; do
-        read -p "Enter the IP address for the Subject Alternative Name: " ip_address
+        read -p "Enter the IP address: " ip_address
         if validate_ip "$ip_address"; then
             break
         else
