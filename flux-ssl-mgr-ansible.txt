@@ -1,0 +1,225 @@
+---
+- name: Generate and Install SSL Certificates
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars:
+    ca_server: localhost  # Change this to your CA server if different
+    ca_path: /root/ca
+    ssl_cert_path: /etc/ssl/certs
+    ssl_key_path: /etc/ssl/private
+    ssl_output_path: /var/ssl/out
+    
+  tasks:
+    - name: Gather system information
+      setup:
+        gather_subset:
+          - network
+          - distribution
+          
+    - name: Extract short hostname
+      set_fact:
+        short_hostname: "{{ ansible_hostname }}"
+        full_domain: "{{ ansible_hostname }}.fluxlab.systems"
+        
+    - name: Display target information
+      debug:
+        msg:
+          - "Target hostname: {{ short_hostname }}"
+          - "Full domain: {{ full_domain }}"
+          - "Distribution: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "OS Family: {{ ansible_os_family }}"
+
+    # Certificate Generation (runs on CA server)
+    - name: Generate SSL certificate on CA server
+      block:
+        - name: Check if CA directory exists
+          stat:
+            path: "{{ ca_path }}"
+          register: ca_dir_check
+          delegate_to: "{{ ca_server }}"
+          
+        - name: Fail if CA directory doesn't exist
+          fail:
+            msg: "CA directory {{ ca_path }} not found on {{ ca_server }}"
+          when: not ca_dir_check.stat.exists
+          
+        - name: Generate private key
+          command: >
+            openssl genrsa -out {{ ca_path }}/intermediate/private/{{ full_domain }}.key.pem 2048
+          delegate_to: "{{ ca_server }}"
+          
+        - name: Set permissions on private key
+          file:
+            path: "{{ ca_path }}/intermediate/private/{{ full_domain }}.key.pem"
+            mode: '0400'
+          delegate_to: "{{ ca_server }}"
+          
+        - name: Create certificate signing request (without IP SAN)
+          command: >
+            openssl req -config {{ ca_path }}/intermediate/openssl.conf
+            -key {{ ca_path }}/intermediate/private/{{ full_domain }}.key.pem
+            -new -sha256
+            -out {{ ca_path }}/intermediate/csr/{{ full_domain }}.csr.pem
+            -subj "/C=US/ST=State/L=City/O=FluxLab/CN={{ full_domain }}"
+          delegate_to: "{{ ca_server }}"
+          
+        - name: Sign the certificate
+          command: >
+            openssl ca -config {{ ca_path }}/intermediate/openssl.conf
+            -extensions server_cert
+            -days 375
+            -notext
+            -md sha256
+            -batch
+            -in {{ ca_path }}/intermediate/csr/{{ full_domain }}.csr.pem
+            -out {{ ca_path }}/intermediate/certs/{{ full_domain }}.cert.pem
+          delegate_to: "{{ ca_server }}"
+          
+        - name: Copy certificate to output directory
+          copy:
+            src: "{{ ca_path }}/intermediate/certs/{{ full_domain }}.cert.pem"
+            dest: "{{ ssl_output_path }}/{{ full_domain }}.cert.pem"
+            remote_src: yes
+          delegate_to: "{{ ca_server }}"
+          
+    # Certificate Installation
+    - name: Create SSL directories on target system
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ ssl_cert_path }}"
+        - "{{ ssl_key_path }}"
+        
+    - name: Copy certificate to target system
+      copy:
+        src: "{{ ssl_output_path }}/{{ full_domain }}.cert.pem"
+        dest: "{{ ssl_cert_path }}/{{ full_domain }}.cert.pem"
+        mode: '0644'
+      delegate_to: "{{ ca_server }}"
+      
+    - name: Copy private key to target system
+      copy:
+        src: "{{ ca_path }}/intermediate/private/{{ full_domain }}.key.pem"
+        dest: "{{ ssl_key_path }}/{{ full_domain }}.key.pem"
+        mode: '0600'
+        owner: root
+        group: root
+      delegate_to: "{{ ca_server }}"
+
+    # Distribution-specific installation
+    - name: Install certificates for Debian/Ubuntu systems
+      block:
+        - name: Update CA certificates (Debian/Ubuntu)
+          command: update-ca-certificates
+          when: ansible_os_family == "Debian"
+          
+        - name: Create symlink for system-wide trust (Debian/Ubuntu)
+          file:
+            src: "{{ ssl_cert_path }}/{{ full_domain }}.cert.pem"
+            dest: "/usr/local/share/ca-certificates/{{ full_domain }}.crt"
+            state: link
+          when: ansible_os_family == "Debian"
+          
+      when: ansible_os_family == "Debian"
+
+    - name: Install certificates for RedHat/CentOS systems
+      block:
+        - name: Copy certificate to CA trust store (RedHat/CentOS)
+          copy:
+            src: "{{ ssl_cert_path }}/{{ full_domain }}.cert.pem"
+            dest: "/etc/pki/ca-trust/source/anchors/{{ full_domain }}.crt"
+            mode: '0644'
+          when: ansible_os_family == "RedHat"
+          
+        - name: Update CA trust (RedHat/CentOS)
+          command: update-ca-trust
+          when: ansible_os_family == "RedHat"
+          
+      when: ansible_os_family == "RedHat"
+
+    - name: Install certificates for SUSE systems
+      block:
+        - name: Copy certificate to CA trust store (SUSE)
+          copy:
+            src: "{{ ssl_cert_path }}/{{ full_domain }}.cert.pem"
+            dest: "/etc/pki/trust/anchors/{{ full_domain }}.crt"
+            mode: '0644'
+          when: ansible_os_family == "Suse"
+          
+        - name: Update CA trust (SUSE)
+          command: update-ca-certificates
+          when: ansible_os_family == "Suse"
+          
+      when: ansible_os_family == "Suse"
+
+    # Service-specific configuration
+    - name: Configure for common web servers
+      block:
+        - name: Check if nginx is installed
+          command: which nginx
+          register: nginx_check
+          failed_when: false
+          changed_when: false
+          
+        - name: Check if apache/httpd is installed
+          command: "{{ item }}"
+          register: apache_check
+          failed_when: false
+          changed_when: false
+          loop:
+            - which apache2
+            - which httpd
+            
+        - name: Create nginx SSL configuration snippet
+          template:
+            content: |
+              ssl_certificate {{ ssl_cert_path }}/{{ full_domain }}.cert.pem;
+              ssl_certificate_key {{ ssl_key_path }}/{{ full_domain }}.key.pem;
+              ssl_protocols TLSv1.2 TLSv1.3;
+              ssl_ciphers ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384;
+              ssl_prefer_server_ciphers off;
+              ssl_session_cache shared:SSL:10m;
+            dest: "/etc/nginx/snippets/{{ full_domain }}-ssl.conf"
+            mode: '0644'
+          when: nginx_check.rc == 0
+          notify: restart nginx
+          
+        - name: Create apache SSL configuration snippet
+          template:
+            content: |
+              SSLEngine on
+              SSLCertificateFile {{ ssl_cert_path }}/{{ full_domain }}.cert.pem
+              SSLCertificateKeyFile {{ ssl_key_path }}/{{ full_domain }}.key.pem
+              SSLProtocol all -SSLv3 -TLSv1 -TLSv1.1
+              SSLCipherSuite ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305
+              SSLHonorCipherOrder off
+              SSLSessionTickets off
+            dest: "/etc/{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}/conf-available/{{ full_domain }}-ssl.conf"
+            mode: '0644'
+          when: apache_check.results | selectattr('rc', 'equalto', 0) | list | length > 0
+          notify: restart apache
+
+    - name: Display installation summary
+      debug:
+        msg:
+          - "Certificate installation completed for {{ full_domain }}"
+          - "Certificate location: {{ ssl_cert_path }}/{{ full_domain }}.cert.pem"
+          - "Private key location: {{ ssl_key_path }}/{{ full_domain }}.key.pem"
+          - "System: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "Web server configurations created (if applicable)"
+
+  handlers:
+    - name: restart nginx
+      service:
+        name: nginx
+        state: restarted
+      when: nginx_check.rc == 0
+      
+    - name: restart apache
+      service:
+        name: "{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}"
+        state: restarted
+      when: apache_check.results | selectattr('rc', 'equalto', 0) | list | length > 0
