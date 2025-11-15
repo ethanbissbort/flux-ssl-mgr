@@ -1,0 +1,38 @@
+# Flux SSL Manager Configuration
+# Copy this file to ~/.config/flux-ssl-mgr/config.toml and customize for your setup
+
+# PKI Directory Configuration
+working_dir = "/root/ca"
+output_dir = "/home/fluxadmin/ssl/pem-out"
+csr_input_dir = "/home/fluxadmin/ssl"
+
+# CA Configuration
+ca_key_path = "/root/ca/intermediate/private/intermediate.key.pem"
+ca_cert_path = "/root/ca/intermediate/certs/intermediate.cert.pem"
+openssl_config = "/root/ca/intermediate/openssl.cnf"
+
+# Default Certificate Settings
+[defaults]
+key_size = 4096              # RSA key size in bits
+cert_days = 375              # Certificate validity period (days)
+hash_algorithm = "sha256"    # Signature hash algorithm
+owner = "fluxadmin"          # Default file owner
+group = "root"               # Default file group
+
+# File Permissions (octal notation)
+[permissions]
+private_key = 0o400          # Private key permissions (read-only for owner)
+certificate = 0o755          # Certificate permissions (readable by all)
+output_dir = 0o755           # Output directory permissions
+
+# Batch Processing Settings
+[batch]
+parallel = true              # Enable parallel processing
+max_workers = 4              # Maximum concurrent operations
+progress_bar = true          # Show progress bar during batch operations
+
+# Output Formatting
+[output]
+colored = true               # Enable colored output
+verbose = false              # Verbose logging (can override with -v flag)
+quiet = false                # Suppress non-error output (can override with -q flag)
