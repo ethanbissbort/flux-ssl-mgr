@@ -1,0 +1,54 @@
+[package]
+name = "flux-ssl-mgr"
+version = "2.0.0"
+edition = "2021"
+authors = ["Ethan Bissbort"]
+description = "A powerful, secure certificate management tool for homestead/homelab internal PKI environments"
+license = "MIT"
+repository = "https://github.com/ethanbissbort/flux-ssl-mgr"
+keywords = ["certificate", "pki", "openssl", "tls", "ssl"]
+categories = ["command-line-utilities", "cryptography"]
+
+[dependencies]
+# CLI & Argument Parsing
+clap = { version = "4.5", features = ["derive", "cargo"] }
+dialoguer = "0.11"
+indicatif = "0.17"
+console = "0.15"
+
+# Cryptography
+openssl = "0.10"
+
+# Configuration & Serialization
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+config = "0.14"
+
+# Error Handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Security
+secrecy = "0.8"
+zeroize = "1.7"
+
+# File Operations
+walkdir = "2.4"
+tempfile = "3.8"
+
+# Utilities
+chrono = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Async/Concurrency
+rayon = "1.8"
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.0"
+tempfile = "3.8"
+
+[[bin]]
+name = "flux-ssl-mgr"
+path = "src/main.rs"
