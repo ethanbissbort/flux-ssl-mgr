@@ -1,562 +1,777 @@
-# Flux SSL Manager - Claude.md
+# Flux SSL Manager - Technical Documentation
 
 ## Project Overview
 
-**flux-ssl-mgr** is a certificate management tool designed for homestead/homelab internal PKI environments. It automates the generation, signing, and management of SSL/TLS certificates using an intermediate Certificate Authority (CA).
+**flux-ssl-mgr** is a secure certificate management tool designed for homestead/homelab internal PKI environments. It automates the generation, signing, and management of SSL/TLS certificates using an intermediate Certificate Authority (CA).
 
 ### Current State
-- **Language**: Bash shell script
-- **Primary Script**: `flux-certs.sh`
-- **Status**: Production-ready bash implementation
-- **Future Goal**: Convert to Rust for improved safety, performance, and maintainability
+- **Language**: Rust (edition 2021)
+- **Version**: 2.0.0
+- **Status**: Production-ready with core features complete
+- **Previous Version**: Bash shell script (archived in `old/` directory)
 
 ### Purpose
 This tool simplifies certificate lifecycle management in a homelab PKI setup by:
-- Generating RSA private keys (4096-bit)
+- Generating RSA private keys (2048-4096 bit, configurable)
 - Creating Certificate Signing Requests (CSRs) with Subject Alternative Names (SANs)
 - Signing certificates using an intermediate CA
 - Managing file permissions and ownership
-- Supporting both single and batch certificate processing
+- Supporting both single and batch certificate processing with parallelization
+- Providing secure password handling for private keys and CA keys
 
 ## Architecture & Design
 
-### Current Bash Implementation
+### Rust Implementation (v2.0)
 
-#### Directory Structure
+#### Project Structure
+
 ```
-/root/ca/                           # PKI working directory
-├── intermediate/
-│   ├── private/                    # Private keys (CA and generated)
-│   │   └── intermediate.key.pem    # Intermediate CA key
-│   ├── certs/                      # Signed certificates
-│   ├── csr/                        # Certificate signing requests
-│   └── openssl.cnf                 # OpenSSL configuration
-/home/fluxadmin/ssl/                # Input directory for CSR files
-└── pem-out/                        # Output directory for generated certs
+flux-ssl-mgr/
+├── Cargo.toml              # Project manifest and dependencies
+├── Cargo.lock              # Locked dependency versions
+├── src/
+│   ├── main.rs             # CLI entry point with clap
+│   ├── lib.rs              # Library root, public API exports
+│   ├── config.rs           # Configuration management (TOML)
+│   ├── error.rs            # Error types using thiserror
+│   ├── batch.rs            # Batch processing with rayon
+│   ├── interactive.rs      # Interactive prompts with dialoguer
+│   ├── output.rs           # Colored terminal output
+│   ├── crypto/
+│   │   ├── mod.rs          # Crypto module exports
+│   │   ├── key.rs          # RSA key generation and management
+│   │   ├── csr.rs          # CSR creation with SAN support
+│   │   └── cert.rs         # Certificate signing and validation
+│   └── ca/
+│       ├── mod.rs          # CA module exports
+│       └── intermediate.rs # Intermediate CA operations
+├── tests/                  # Integration tests (to be expanded)
+├── .github/
+│   └── workflows/
+│       └── rust.yml        # CI/CD workflow
+├── old/                    # Archived bash implementation
+│   ├── flux-ssl-mgr.sh
+│   └── flux-ssl-mgr-ansible.txt
+├── config.toml.example     # Example configuration
+├── README.md               # User documentation
+├── claude.md               # This file - technical documentation
+└── ROADMAP.md              # Project roadmap and future plans
 ```
 
 #### Key Features
-1. **Password-Protected CA Key Handling**
-   - Detects if intermediate CA key is password-protected
-   - Creates temporary unlocked key for session
-   - Automatic cleanup on exit via trap mechanism
 
-2. **Dual Processing Modes**
-   - **Single Mode**: Interactive certificate generation
-   - **Batch Mode**: Process multiple CSR files from directory
+1. **Type Safety & Memory Safety**
+   - Leverages Rust's ownership system to prevent memory errors
+   - No buffer overflows, use-after-free, or memory leaks
+   - Compile-time guarantees for thread safety
 
-3. **Certificate Generation Workflow**
-   - Generate private key (optionally password-protected)
-   - Create CSR with SANs
-   - Sign certificate with intermediate CA (375-day validity)
-   - Convert to both PEM and CRT formats
+2. **Secure Password Handling**
+   - `secrecy` crate wraps sensitive strings in `Secret<String>`
+   - `zeroize` crate ensures memory is zeroed before deallocation
+   - Passwords never appear in debug output or logs
+   - Temporary CA keys automatically cleaned up via RAII
+
+3. **Comprehensive Error Handling**
+   - Custom `FluxError` enum covers all error cases
+   - Rich error context with file paths and descriptions
+   - Proper error propagation using `Result<T>` type
+   - User-friendly error messages
+
+4. **Dual Processing Modes**
+   - **Single Mode**: Interactive or CLI certificate generation
+   - **Batch Mode**: Process multiple CSRs with optional parallelization
+
+5. **Certificate Generation Workflow**
+   - Generate RSA private key (optionally password-protected with AES-256)
+   - Create CSR with SANs (DNS, IP, Email)
+   - Sign certificate with intermediate CA
+   - Output in both PEM and CRT formats
    - Copy to output directory with proper permissions
+   - Set file ownership (Unix only)
 
-4. **File Permissions**
-   - Private keys: 400 (read-only for owner)
-   - Certificates: 755 (readable by all)
-   - Ownership: fluxadmin:root
+6. **Configuration Management**
+   - TOML-based configuration files
+   - Multiple search paths (local, user, system)
+   - Serde for serialization/deserialization
+   - Runtime validation of configuration
 
-5. **User Experience**
-   - Colored output (green/yellow/red)
-   - Progress indicators
-   - Error handling with `set -e`
-   - Cleanup on exit
+7. **User Experience**
+   - Colored output using `console` crate
+   - Interactive prompts using `dialoguer`
+   - Progress tracking
+   - Clear error messages with helpful suggestions
 
 ### Technical Components
 
-#### OpenSSL Operations
-- **Key Generation**: RSA 4096-bit with optional AES-256 encryption
-- **CSR Creation**: SHA-256 with SAN extensions
-- **Certificate Signing**: SHA-256, 375-day validity, server_cert extensions
+#### 1. Configuration Module (`src/config.rs`)
 
-#### Security Considerations
-- Temporary files created with PID suffix (`$$`)
-- Restrictive permissions (600 on temp CA key, 400 on private keys)
-- Automatic cleanup via trap mechanism
-- Password-protected CA key support
+Manages application configuration with TOML files.
 
-## Usage Instructions
-
-### Prerequisites
-- Root access or sudo privileges
-- OpenSSL installed
-- Intermediate CA already set up at `/root/ca/intermediate/`
-- Proper directory permissions
-
-### Running the Script
-
-#### Single Certificate Mode
-```bash
-sudo ./flux-certs.sh
-# Select option 1
-# Provide:
-#   - Certificate name (e.g., "myservice")
-#   - SANs (e.g., "DNS:myservice.fluxlab.systems,IP:10.0.2.100")
-#   - Password protection preference
+**Key Structures:**
+```rust
+pub struct Config {
+    pub working_dir: PathBuf,
+    pub output_dir: PathBuf,
+    pub csr_input_dir: PathBuf,
+    pub ca_key_path: PathBuf,
+    pub ca_cert_path: PathBuf,
+    pub openssl_config: PathBuf,
+    pub defaults: Defaults,
+    pub permissions: Permissions,
+    pub batch: BatchConfig,
+    pub output: OutputConfig,
+}
 ```
 
-#### Batch Processing Mode
-```bash
-sudo ./flux-certs.sh
-# Select option 2
-# Provide:
-#   - CSR directory path
-#   - Select CSRs to process (all, range, or specific)
-#   - Common SANs or individual configuration
-#   - Password protection preference
+**Features:**
+- Validates paths on load (ensures CA keys and configs exist)
+- Supports multiple config file locations
+- Default values using serde defaults
+- Configuration serialization for saving
+
+**Search Order:**
+1. `./flux-ssl-mgr.toml`
+2. `~/.config/flux-ssl-mgr/config.toml`
+3. `/etc/flux-ssl-mgr/config.toml`
+
+#### 2. Error Handling Module (`src/error.rs`)
+
+Comprehensive error types using `thiserror`.
+
+**Error Categories:**
+- File I/O errors (read, write, not found)
+- CA-related errors (key not found, unlock failed)
+- Cryptographic errors (key generation, signing failures)
+- Configuration errors (invalid values, missing settings)
+- Interactive mode errors (user cancellation, prompt failures)
+
+**Example:**
+```rust
+#[derive(Debug, Error)]
+pub enum FluxError {
+    #[error("CA key not found: {0}")]
+    CaKeyNotFound(PathBuf),
+
+    #[error("Invalid SAN format: {0}")]
+    InvalidSanFormat(String),
+
+    #[error("OpenSSL error: {0}")]
+    OpenSslError(#[from] openssl::error::ErrorStack),
+}
 ```
 
-### Output Files
-For each certificate named `example`:
-- `example.cert.pem` - Certificate in PEM format
-- `example.crt` - Certificate in CRT format
-- `example.key.pem` - Private key
+#### 3. Cryptography Module (`src/crypto/`)
 
-Location: `/home/fluxadmin/ssl/pem-out/`
+Handles all cryptographic operations using OpenSSL.
+
+**Key Generation (`key.rs`):**
+- RSA key generation (configurable size: 2048, 4096, etc.)
+- Password protection using AES-256-CBC
+- Key encryption detection
+- Secure password prompting
+- Temporary CA key unlocking with automatic cleanup
+
+**CSR Creation (`csr.rs`):**
+- X.509 CSR generation
+- Subject Alternative Name (SAN) support
+  - DNS names
+  - IP addresses
+  - Email addresses
+- SAN parsing from string format (`DNS:example.com,IP:192.168.1.1`)
+- SHA-256 signing
+
+**Certificate Signing (`cert.rs`):**
+- CSR signing with CA key
+- Random serial number generation
+- Configurable validity period
+- Extension copying from CSR
+- Certificate information extraction
+- Expiration checking and days-until-expiration calculation
+- PEM and DER format support
+
+#### 4. CA Module (`src/ca/`)
+
+Manages intermediate Certificate Authority operations.
+
+**IntermediateCA Structure:**
+```rust
+pub struct IntermediateCA {
+    key: PKey<Private>,
+    cert: X509,
+    _temp_file: Option<tempfile::NamedTempFile>,
+}
+```
+
+**Features:**
+- Automatic CA key encryption detection
+- Password prompting for encrypted CA keys
+- Temporary unlocked key creation (RAII cleanup)
+- CA certificate loading and validation
+- Subject name extraction
+
+**Security:**
+- Temporary files created with mode 0600
+- Automatic cleanup via `Drop` trait
+- Memory zeroing for sensitive data
+
+#### 5. Batch Processing Module (`src/batch.rs`)
+
+Efficient processing of multiple certificates.
+
+**Features:**
+- CSR file discovery using `walkdir`
+- Name pattern filtering
+- Sequential or parallel processing (via `rayon`)
+- Progress tracking
+- Error aggregation
+
+**Batch Result:**
+```rust
+pub struct BatchResult {
+    pub successful: usize,
+    pub failed: usize,
+    pub errors: Vec<(String, String)>,
+}
+```
+
+**Processing Flow:**
+1. Discover CSR files in directory
+2. Apply optional filters
+3. Load CA once (reuse for all certificates)
+4. Process certificates (parallel or sequential)
+5. Collect results and errors
+6. Display summary
+
+#### 6. Interactive Module (`src/interactive.rs`)
+
+User-friendly interactive prompts using `dialoguer`.
+
+**Prompt Types:**
+- Text input with validation
+- Confirmation (yes/no)
+- Single selection
+- Multi-selection
+- Password input with confirmation
+
+**Validation:**
+- Certificate name: alphanumeric, hyphens, underscores, dots
+- SANs: proper format (TYPE:value)
+- Certificate days: 1-825 (CA/Browser Forum limit)
+
+#### 7. Output Module (`src/output.rs`)
+
+Colored terminal output using `console`.
+
+**Output Types:**
+- Success (green ✓)
+- Error (red ✗)
+- Warning (yellow ⚠)
+- Info (blue ℹ)
+- Headers and separators
+- Progress steps
+
+**Configuration:**
+- Enable/disable colors
+- Verbose mode
+- Quiet mode
+
+#### 8. Main Module (`src/main.rs`)
+
+CLI entry point using `clap` v4.
+
+**Commands:**
+- `single` - Generate single certificate
+- `batch` - Process multiple CSRs
+- `info` - Display certificate information
+- `config` - Configuration management
+
+**Global Options:**
+- `-c, --config` - Custom config file path
+- `-v, --verbose` - Enable verbose output
+- `-q, --quiet` - Suppress non-error output
+
+**Logging:**
+- `tracing` crate for structured logging
+- `RUST_LOG` environment variable support
+- Log levels: error, warn, info, debug, trace
+
+### Dependencies
+
+#### CLI & User Interface
+- **clap** (4.5) - Command-line argument parsing with derive macros
+- **dialoguer** (0.11) - Interactive prompts
+- **indicatif** (0.17) - Progress bars (for future use)
+- **console** (0.15) - Terminal colors and formatting
+
+#### Cryptography
+- **openssl** (0.10) - OpenSSL bindings for crypto operations
+
+#### Configuration & Serialization
+- **serde** (1.0) - Serialization framework
+- **toml** (0.8) - TOML format support
+- **config** (0.14) - Layered configuration management
+
+#### Error Handling
+- **thiserror** (1.0) - Error derive macros
+- **anyhow** (1.0) - Flexible error handling for applications
+
+#### Security
+- **secrecy** (0.8) - Wrapper types for sensitive data
+- **zeroize** (1.7) - Secure memory zeroing
+
+#### File Operations
+- **walkdir** (2.4) - Recursive directory traversal
+- **tempfile** (3.8) - Temporary file management
+
+#### Utilities
+- **chrono** (0.4) - Date and time handling
+- **tracing** (0.1) - Structured logging
+- **tracing-subscriber** (0.3) - Logging subscriber with env filter
+
+#### Async/Concurrency
+- **rayon** (1.8) - Data parallelism
+
+#### Development Dependencies
+- **assert_cmd** (2.0) - Command testing
+- **predicates** (3.0) - Assertion helpers
+- **tempfile** (3.8) - Temporary files for tests
+
+### Security Considerations
+
+#### Best Practices Implemented
+
+1. **Memory Safety**
+   - Rust's ownership system prevents:
+     - Use-after-free
+     - Double-free
+     - Buffer overflows
+     - Data races
+   - Compile-time guarantees
+
+2. **Secure Password Handling**
+   - Passwords wrapped in `Secret<String>` (secrecy crate)
+   - Memory zeroed on drop (zeroize crate)
+   - Never logged or printed
+   - Not included in Debug output
+
+3. **Temporary File Security**
+   - Created with mode 0600 (owner read/write only)
+   - Automatic cleanup via RAII (`Drop` trait)
+   - Secure random filenames (tempfile crate)
+   - No temporary file leaks
+
+4. **File Permissions**
+   - Private keys: 0o400 (owner read only)
+   - Certificates: 0o755 (world readable)
+   - Configurable via config file
+
+5. **Cryptographic Best Practices**
+   - RSA 4096-bit keys by default
+   - SHA-256 for signing
+   - AES-256-CBC for key encryption
+   - Cryptographically secure random number generation
+
+6. **Input Validation**
+   - Certificate names validated against allowed characters
+   - SANs validated for proper format
+   - Configuration validated on load
+   - Path validation before use
+
+#### Known Limitations
+
+1. **File Ownership**
+   - Currently commented out (requires `users` and `nix` crates)
+   - Ownership changes require root privileges
+   - Platform-specific implementation needed
+
+2. **Platform Support**
+   - Primary target: Linux
+   - macOS: Should work but less tested
+   - Windows: Limited support (no Unix permissions)
+
+3. **CA Database Management**
+   - Does not manage OpenSSL CA database (index.txt, serial)
+   - Assumes existing PKI infrastructure
+   - No certificate revocation list (CRL) management
+
+4. **Key Algorithm Support**
+   - Currently RSA only
+   - ECDSA support planned for v2.1
+
+## Testing Strategy
+
+### Current Test Coverage
+
+**Unit Tests:**
+- `src/crypto/key.rs` - Key generation, encryption, loading
+- `src/crypto/csr.rs` - SAN parsing, CSR creation
+- `src/crypto/cert.rs` - Certificate signing, validation
+
+**Test Helpers:**
+- Mock CA certificate and key creation
+- Temporary directory management
+- Test fixtures
+
+### Testing Checklist
+
+- [x] RSA key generation (multiple sizes)
+- [x] Password-protected key saving/loading
+- [x] Key encryption detection
+- [x] SAN entry parsing (DNS, IP, Email)
+- [x] CSR creation with SANs
+- [x] CSR saving and loading
+- [x] Certificate signing
+- [x] Certificate PEM/DER export
+- [x] Certificate information extraction
+- [x] Certificate expiration checking
+- [ ] Configuration file loading
+- [ ] Batch processing
+- [ ] Interactive prompts (requires mocking)
+- [ ] File permission setting
+- [ ] CA key unlocking
+- [ ] Error handling paths
+- [ ] Integration tests (end-to-end)
+
+### Running Tests
+
+```bash
+# Run all tests
+cargo test
+
+# Run specific module tests
+cargo test --lib crypto::key
+cargo test --lib crypto::csr
+cargo test --lib crypto::cert
+
+# Run with output
+cargo test -- --nocapture
+
+# Run with logging
+RUST_LOG=debug cargo test
+
+# Generate coverage report
+cargo tarpaulin --out Html
+```
 
 ## Development Guidelines
 
 ### Code Organization
-- Single-responsibility functions
-- Clear variable naming conventions
-- Error handling at each step
-- User-friendly output messages
 
-### Testing Checklist
-- [ ] Password-protected CA key handling
-- [ ] Unprotected CA key handling
-- [ ] Single certificate generation
-- [ ] Batch processing with common SANs
-- [ ] Batch processing with individual SANs
-- [ ] Password-protected private keys
-- [ ] Unprotected private keys
-- [ ] File permission verification
-- [ ] Cleanup mechanism (temp files removed)
-- [ ] Error handling (missing directories, invalid inputs)
+1. **Module Hierarchy**
+   - Top-level modules for major functionality
+   - Sub-modules for related components
+   - Clear public API via `lib.rs`
 
-### Modifying the Script
-1. **Adding new certificate extensions**: Modify the OpenSSL config or `-extensions` parameter
-2. **Changing key sizes**: Update the `openssl genrsa` command parameter
-3. **Adjusting certificate validity**: Modify the `-days` parameter in signing command
-4. **Customizing output locations**: Update `OUTPUT_DIR` and related paths
+2. **Error Handling**
+   - Use `Result<T>` for fallible operations
+   - Define custom error types in `error.rs`
+   - Provide context in error messages
+   - Use `?` operator for error propagation
 
-### Known Limitations
-- Requires root privileges
-- Hardcoded paths (need manual adjustment for different environments)
-- Limited to RSA keys (no ECDSA support)
-- No certificate renewal tracking
-- No integration with ACME/Let's Encrypt
+3. **Documentation**
+   - Public APIs documented with `///` comments
+   - Module-level documentation with `//!`
+   - Examples in documentation
+   - Link to relevant types and functions
 
-## Future Rust Conversion
+4. **Testing**
+   - Unit tests in same file as code (`#[cfg(test)]`)
+   - Integration tests in `tests/` directory
+   - Test edge cases and error conditions
+   - Use descriptive test names
 
-### Conversion Goals
-1. **Type Safety**: Eliminate runtime errors through Rust's type system
-2. **Memory Safety**: No buffer overflows or memory leaks
-3. **Concurrency**: Safe concurrent batch processing
-4. **Error Handling**: Rich error types and proper error propagation
-5. **Cross-Platform**: Support Linux, macOS, and potentially Windows
-6. **Configuration**: TOML/YAML config files instead of hardcoded paths
-7. **Testing**: Comprehensive unit and integration tests
+### Code Style
 
-### Recommended Rust Architecture
+**Rust API Guidelines:**
+- Follow [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
+- Use `snake_case` for functions and variables
+- Use `PascalCase` for types and traits
+- Use `SCREAMING_SNAKE_CASE` for constants
 
-#### Project Structure
-```
-flux-ssl-mgr/
-├── Cargo.toml
-├── src/
-│   ├── main.rs              # CLI entry point
-│   ├── lib.rs               # Library root
-│   ├── config.rs            # Configuration management
-│   ├── crypto/
-│   │   ├── mod.rs
-│   │   ├── key.rs           # Key generation and management
-│   │   ├── csr.rs           # CSR creation
-│   │   └── cert.rs          # Certificate signing and management
-│   ├── ca/
-│   │   ├── mod.rs
-│   │   └── intermediate.rs  # Intermediate CA operations
-│   ├── batch.rs             # Batch processing logic
-│   ├── interactive.rs       # Interactive mode
-│   ├── output.rs            # Output formatting and colors
-│   └── error.rs             # Error types
-├── tests/
-│   ├── integration_tests.rs
-│   └── fixtures/            # Test certificates and configs
-└── benches/                 # Performance benchmarks
-```
+**Error Messages:**
+- Be specific and actionable
+- Include relevant context (paths, values)
+- Suggest solutions when possible
 
-#### Key Rust Crates to Use
+**Comments:**
+- Explain "why", not "what"
+- Use TODO/FIXME for known issues
+- Keep comments up-to-date with code
 
-**Cryptography**
-- `openssl` or `rust-openssl` - OpenSSL bindings
-- `rustls` - (Optional) Pure Rust TLS implementation
-- `x509-parser` - X.509 certificate parsing
-- `rcgen` - (Alternative) Pure Rust X.509 certificate generation
+### Security Guidelines
 
-**CLI & User Interface**
-- `clap` v4 - Command-line argument parsing (derive API)
-- `dialoguer` - Interactive prompts
-- `indicatif` - Progress bars and spinners
-- `console` - Terminal colors and formatting
-- `crossterm` - Cross-platform terminal manipulation
+1. **Never Hardcode Secrets**
+   - Use configuration files
+   - Prompt for sensitive data
+   - Use environment variables if needed
 
-**Configuration**
-- `serde` - Serialization/deserialization
-- `toml` - TOML configuration files
-- `config` - Layered configuration management
+2. **Validate All Inputs**
+   - Check file paths before use
+   - Validate user input formats
+   - Sanitize data for display
 
-**Error Handling**
-- `thiserror` - Error derive macros
-- `anyhow` - Flexible error handling for applications
+3. **Handle Errors Securely**
+   - Don't leak sensitive information in errors
+   - Use generic messages for security errors
+   - Log details for debugging (not to user)
 
-**Async/Concurrency** (for batch processing)
-- `tokio` - Async runtime
-- `rayon` - Data parallelism
+4. **Use Secure Defaults**
+   - Strong key sizes (4096-bit RSA)
+   - Short certificate validity (375 days)
+   - Restrictive file permissions
 
-**Security**
-- `secrecy` - Wrapper types for secret data
-- `zeroize` - Securely zero memory
+### Performance Considerations
 
-**File Operations**
-- `walkdir` - Directory traversal
-- `tempfile` - Temporary file management
+1. **Batch Processing**
+   - Use rayon for CPU-bound parallelization
+   - Reuse CA key across certificates
+   - Minimize file I/O operations
 
-**Utilities**
-- `chrono` - Date/time handling
-- `tracing` - Structured logging
+2. **Memory Usage**
+   - Stream large files when possible
+   - Clean up resources promptly (RAII)
+   - Avoid unnecessary allocations
 
-#### Core Features to Implement
-
-1. **Configuration Module** (`config.rs`)
-   ```rust
-   pub struct Config {
-       pub working_dir: PathBuf,
-       pub output_dir: PathBuf,
-       pub ca_key_path: PathBuf,
-       pub openssl_config: PathBuf,
-       pub default_key_size: u32,
-       pub default_cert_days: u32,
-       pub default_owner: String,
-       pub default_group: String,
-   }
-   ```
-
-2. **Error Handling** (`error.rs`)
-   ```rust
-   #[derive(Debug, thiserror::Error)]
-   pub enum FluxError {
-       #[error("CA key not found: {0}")]
-       CaKeyNotFound(PathBuf),
-       #[error("Invalid certificate name: {0}")]
-       InvalidCertName(String),
-       #[error("OpenSSL error: {0}")]
-       OpenSslError(#[from] openssl::error::ErrorStack),
-       // ... more error variants
-   }
-   ```
-
-3. **Key Generation Module** (`crypto/key.rs`)
-   - Generate RSA/ECDSA keys
-   - Password protection using secrecy crate
-   - Key format conversion
-
-4. **CSR Module** (`crypto/csr.rs`)
-   - Create CSR with SANs
-   - Parse existing CSR files
-   - Validate CSR contents
-
-5. **Certificate Module** (`crypto/cert.rs`)
-   - Sign certificates
-   - Convert between formats (PEM/CRT/DER)
-   - Extract certificate information
-   - Validate certificates
-
-6. **CA Module** (`ca/intermediate.rs`)
-   - Load intermediate CA
-   - Unlock password-protected keys
-   - Manage CA certificate chain
-
-7. **Batch Processing** (`batch.rs`)
-   - Discover CSR files
-   - Parallel processing with Rayon or Tokio
-   - Progress tracking
-   - Error aggregation
-
-8. **Interactive Mode** (`interactive.rs`)
-   - Use dialoguer for prompts
-   - Input validation
-   - Confirmation prompts
-
-9. **CLI Interface** (`main.rs`)
-   ```rust
-   #[derive(Parser)]
-   #[command(name = "flux-ssl-mgr")]
-   #[command(about = "Certificate management for homelab PKI")]
-   struct Cli {
-       #[command(subcommand)]
-       command: Commands,
-   }
-
-   #[derive(Subcommand)]
-   enum Commands {
-       /// Generate a single certificate
-       Single {
-           /// Certificate name
-           #[arg(short, long)]
-           name: String,
-           /// Subject Alternative Names
-           #[arg(short, long, value_delimiter = ',')]
-           sans: Vec<String>,
-           /// Password-protect the private key
-           #[arg(short, long)]
-           password: bool,
-       },
-       /// Batch process CSR files
-       Batch {
-           /// Directory containing CSR files
-           #[arg(short, long)]
-           dir: PathBuf,
-           /// Process all CSRs without prompting
-           #[arg(short, long)]
-           all: bool,
-       },
-       /// Show certificate information
-       Info {
-           /// Certificate file path
-           cert: PathBuf,
-       },
-   }
-   ```
-
-### Conversion Strategy
-
-#### Phase 1: Project Setup
-1. Initialize Cargo project
-2. Set up directory structure
-3. Add dependencies to Cargo.toml
-4. Create basic CLI with clap
-5. Implement configuration loading
-
-#### Phase 2: Core Functionality
-1. Implement error types
-2. Create crypto modules (key, csr, cert)
-3. Implement CA module
-4. Add file operations and permissions
-
-#### Phase 3: User Interface
-1. Implement single certificate mode
-2. Implement batch processing mode
-3. Add interactive prompts
-4. Implement colored output and progress indicators
-
-#### Phase 4: Testing & Documentation
-1. Unit tests for all modules
-2. Integration tests with test fixtures
-3. Documentation comments (rustdoc)
-4. User guide and examples
-
-#### Phase 5: Polish & Distribution
-1. Error message refinement
-2. Performance optimization
-3. Cross-platform testing
-4. Create installation instructions
-5. Package as binary (cargo install, releases)
-
-### Migration Considerations
-
-#### Compatibility
-- Maintain same output directory structure
-- Preserve file permission model
-- Support existing OpenSSL config files
-- Backward compatibility with existing CSR files
-
-#### Improvements Over Bash Version
-- **Configuration files**: No hardcoded paths
-- **Better error messages**: Rich error types with context
-- **Validation**: Input validation before processing
-- **Dry-run mode**: Preview operations without execution
-- **Certificate tracking**: Optional database or JSON tracking
-- **Renewal reminders**: Track expiration dates
-- **ACME support**: (Future) Let's Encrypt integration
-- **Multiple CA support**: Work with multiple intermediate CAs
-- **Key algorithm flexibility**: RSA + ECDSA support
-- **Logging**: Structured logging with different levels
-- **Non-interactive mode**: Full CLI args for automation
-
-### Testing Strategy for Rust Version
-
-1. **Unit Tests**
-   - Each function in crypto modules
-   - Configuration parsing
-   - Error handling paths
-
-2. **Integration Tests**
-   - Full certificate generation workflow
-   - Batch processing
-   - File permission verification
-   - Cleanup verification
-
-3. **Test Fixtures**
-   - Sample CA certificates
-   - Test OpenSSL configurations
-   - Various CSR files
-
-4. **Security Tests**
-   - Memory zeroization for sensitive data
-   - Proper file permissions
-   - No temporary file leaks
+3. **Cryptographic Operations**
+   - Most time spent in OpenSSL
+   - Key generation is slowest operation
+   - Signing is relatively fast
 
 ## Instructions for Claude/AI Assistants
 
 ### When Working on This Project
 
-1. **Current Implementation**
-   - The `old/` directory contains deprecated code and can be ignored
-   - Focus on `flux-certs.sh` for understanding current functionality
-   - All paths are currently hardcoded for a specific homelab environment
+1. **Understanding the Codebase**
+   - Start with `src/lib.rs` for module overview
+   - Read `src/error.rs` to understand error handling
+   - Check `src/config.rs` for configuration structure
+   - Review crypto modules for core functionality
 
-2. **Making Changes to Bash Script**
-   - Always test error handling paths
-   - Maintain the cleanup trap mechanism
-   - Preserve colored output for user feedback
-   - Keep backward compatibility with existing file structures
-   - Update usage prompts if adding new features
+2. **Making Code Changes**
+   - Always run tests after changes: `cargo test`
+   - Format code before committing: `cargo fmt`
+   - Run clippy for linting: `cargo clippy`
+   - Update documentation comments
+   - Add tests for new functionality
 
-3. **Starting Rust Conversion**
-   - Begin with Phase 1 (Project Setup) from the conversion strategy
-   - Prioritize type safety and error handling
-   - Use modern Rust idioms (edition 2021+)
-   - Follow Rust API guidelines
-   - Write tests alongside implementation
+3. **Adding New Features**
+   - Define error types first (in `error.rs`)
+   - Implement core logic with proper error handling
+   - Add configuration options if needed
+   - Write unit tests
+   - Update CLI if user-facing
+   - Document in README.md
 
-4. **Key Design Principles**
-   - Security first: Handle secrets properly, validate inputs
-   - User experience: Clear messages, progress indicators
-   - Reliability: Comprehensive error handling, cleanup guarantees
-   - Maintainability: Well-documented, modular code
-   - Performance: Efficient batch processing for multiple certificates
+4. **Common Tasks**
 
-5. **Questions to Ask User**
-   - Configuration preferences (TOML vs YAML)
-   - Desired CLI style (interactive vs pure CLI args)
-   - Platform targets (Linux-only or cross-platform)
-   - Additional features to prioritize
-   - Existing PKI infrastructure details
+   **Add Support for ECDSA Keys:**
+   1. Update `crypto::key` module for ECDSA generation
+   2. Modify CSR creation to support ECDSA
+   3. Update configuration for key type selection
+   4. Add tests for ECDSA operations
+   5. Update documentation
 
-6. **Before Making Major Changes**
-   - Understand the full certificate workflow
-   - Review OpenSSL command parameters
-   - Test with a non-production CA if possible
-   - Consider impact on existing certificate files
+   **Implement Certificate Renewal:**
+   1. Add expiration checking function (already exists)
+   2. Create renewal command in CLI
+   3. Load existing certificate and key
+   4. Generate new CSR with same SANs
+   5. Sign and replace certificate
 
-7. **Documentation Updates**
-   - Keep this claude.md file updated
-   - Document any breaking changes
-   - Update usage examples
-   - Note security considerations
+   **Add Certificate Revocation Support:**
+   1. Add CRL management functions
+   2. Update CA module for revocation operations
+   3. Add CLI command for revocation
+   4. Update OpenSSL config handling
+   5. Document CRL workflow
 
-### Common Tasks
+   **Enhance Batch Processing:**
+   1. Add progress bar using indicatif
+   2. Implement filtering options
+   3. Add dry-run mode
+   4. Export batch reports (JSON/CSV)
+   5. Add resume capability
 
-**Add Support for ECDSA Keys**
-1. Add new key type parameter
-2. Update key generation function
-3. Modify CSR creation for ECDSA
-4. Test with intermediate CA
+5. **Debugging Tips**
+   - Use `RUST_LOG=debug` or `RUST_LOG=trace` for detailed logs
+   - Check `tracing::debug!` and `tracing::info!` calls
+   - Use `dbg!()` macro for quick debugging
+   - Run with `--verbose` flag for more output
+   - Check error source chains for root causes
 
-**Implement Certificate Renewal**
-1. Add expiration checking
-2. Create renewal command/mode
-3. Preserve certificate metadata
-4. Optional notification system
+6. **Security Checklist**
+   - [ ] No hardcoded secrets or passwords
+   - [ ] Sensitive data wrapped in `Secret<T>`
+   - [ ] Memory zeroed after use (zeroize)
+   - [ ] File permissions set correctly
+   - [ ] Input validation performed
+   - [ ] Error messages don't leak sensitive info
+   - [ ] Temporary files cleaned up
+   - [ ] Cryptographic randomness used
 
-**Add Configuration File Support**
-1. Define config schema
-2. Implement config parser
-3. Support config file path via CLI
-4. Merge CLI args with config file
+### Questions to Ask Users
 
-**Enhance Batch Processing**
-1. Add parallel processing
-2. Implement better progress tracking
-3. Add filtering options (by date, name pattern)
-4. Export batch reports
+When extending or modifying the project:
+
+1. **Feature Requirements**
+   - What is the use case?
+   - Who are the users (human or automation)?
+   - What are the security requirements?
+   - Platform targets (Linux, macOS, Windows)?
+
+2. **Configuration**
+   - Should it be configurable?
+   - Default values?
+   - Required vs. optional settings?
+
+3. **Error Handling**
+   - How should errors be presented?
+   - Retry behavior?
+   - Fallback options?
+
+4. **Compatibility**
+   - Backward compatibility needed?
+   - Breaking changes acceptable?
+   - Migration path for existing users?
 
 ### Resources
 
 - [OpenSSL Documentation](https://www.openssl.org/docs/)
-- [X.509 Certificate Format](https://datatracker.ietf.org/doc/html/rfc5280)
-- [Rust OpenSSL Crate](https://docs.rs/openssl/latest/openssl/)
-- [rcgen - Pure Rust X.509](https://docs.rs/rcgen/latest/rcgen/)
+- [X.509 Certificate Format (RFC 5280)](https://datatracker.ietf.org/doc/html/rfc5280)
+- [Rust OpenSSL Crate Docs](https://docs.rs/openssl/latest/openssl/)
+- [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
 - [PKI Best Practices](https://www.ietf.org/rfc/rfc4210.txt)
-
-### Environment Notes
-
-- **Target Environment**: Linux homelab/homestead
-- **User Context**: Root or fluxadmin user
-- **CA Type**: Two-tier PKI (root + intermediate)
-- **Certificate Use Cases**: Internal services (HTTPS, TLS)
-- **Integration Points**: Services consuming certificates from output directory
+- [clap Documentation](https://docs.rs/clap/latest/clap/)
+- [secrecy Crate](https://docs.rs/secrecy/latest/secrecy/)
 
 ## Troubleshooting
 
-### Common Issues
+### Common Development Issues
 
-**CA Key Not Found**
-- Verify `/root/ca/intermediate/private/intermediate.key.pem` exists
-- Check file permissions (should be readable by root)
+**Build Fails with OpenSSL Not Found**
+```bash
+# Install OpenSSL development libraries
+sudo apt-get install libssl-dev pkg-config  # Ubuntu/Debian
+sudo dnf install openssl-devel              # Fedora
+brew install openssl@3 pkg-config           # macOS
 
-**Permission Denied**
-- Script requires root privileges
-- Use `sudo ./flux-certs.sh`
+# Set PKG_CONFIG_PATH on macOS
+export PKG_CONFIG_PATH="/usr/local/opt/openssl@3/lib/pkgconfig"
+```
 
-**Certificate Signing Fails**
-- Verify intermediate CA certificate is valid
-- Check OpenSSL configuration file
-- Ensure CA database files exist (index.txt, serial)
+**Tests Fail Due to Missing CA**
+- Tests create mock CA certificates
+- Check test helper functions in `cert.rs`
+- Ensure tempfile cleanup is working
 
-**CSR Not Found**
-- Check CSR file location
-- Verify file extension is `.csr`
-- Ensure file path is correct
+**Clippy Warnings**
+```bash
+# Fix automatically when possible
+cargo clippy --fix
+
+# Allow specific warnings
+#[allow(clippy::module_name_repetitions)]
+
+# Project-wide allows in src/lib.rs or Cargo.toml
+```
+
+**Format Issues**
+```bash
+# Format all code
+cargo fmt
+
+# Check without modifying
+cargo fmt --check
+```
 
 ## Future Enhancements
 
-### Short-term (Bash)
-- [ ] Add certificate revocation support
-- [ ] Implement certificate renewal checking
-- [ ] Add JSON output mode for automation
-- [ ] Support custom certificate validity periods
-- [ ] Add certificate verification command
+See [ROADMAP.md](ROADMAP.md) for comprehensive future plans.
 
-### Long-term (Rust)
-- [ ] Complete Rust conversion (see conversion strategy)
-- [ ] Add ACME protocol support
-- [ ] Implement certificate monitoring/alerting
-- [ ] Create web UI for certificate management
-- [ ] Add database backend for certificate tracking
-- [ ] Support multiple intermediate CAs
-- [ ] Implement automated renewal workflows
-- [ ] Add metrics and reporting
-- [ ] Support hardware security modules (HSM)
+### Short-term (v2.1)
+- Complete test coverage (unit + integration)
+- Add file ownership management (users + nix crates)
+- Certificate renewal tracking
+- Expiration notifications
+- ECDSA key support
+- Enhanced logging and auditing
+
+### Medium-term (v2.2-2.5)
+- Certificate revocation support
+- Multiple CA support
+- Database backend for tracking
+- Certificate search and filtering
+- Automated backup/restore
+- REST API for automation
+
+### Long-term (v3.0+)
+- ACME protocol support (Let's Encrypt)
+- Web UI for certificate management
+- Hardware Security Module (HSM) support
+- Certificate monitoring and alerting
+- Integration with service discovery (Consul, etcd)
+- Plugin system for extensions
 
 ## Contributing
 
 When contributing to this project:
-1. Understand the PKI workflow
-2. Test thoroughly with non-production CA
-3. Maintain backward compatibility
-4. Update documentation
-5. Follow security best practices
-6. Add tests for new features
+
+1. **Code Quality**
+   - Write idiomatic Rust code
+   - Follow project conventions
+   - Add comprehensive tests
+   - Document public APIs
+
+2. **Security**
+   - Follow security best practices
+   - No unsafe code without justification
+   - Validate all inputs
+   - Handle secrets properly
+
+3. **Testing**
+   - Test with non-production CA if possible
+   - Include unit tests for new functions
+   - Add integration tests for workflows
+   - Test error paths
+
+4. **Documentation**
+   - Update README.md for user-facing changes
+   - Update this file for architecture changes
+   - Add inline documentation
+   - Include examples
+
+5. **Pull Requests**
+   - Clear description of changes
+   - Link to related issues
+   - Include test results
+   - Note breaking changes
 
 ## License
 
-(To be determined by repository owner)
+MIT License - See [LICENSE](LICENSE) file for details.
+
+## Changelog
+
+### Version 2.0.0 (Current)
+- Complete Rust rewrite from bash
+- Interactive and CLI modes
+- Batch processing with parallelization
+- Configuration file support (TOML)
+- Secure password handling
+- Comprehensive error types
+- Modern CLI with clap
+- Colored output
+- Unit tests for crypto operations
+
+### Version 1.0.0 (Bash - Archived)
+- Original bash implementation
+- Single and batch modes
+- Basic error handling
+- Hardcoded paths
+- See `old/flux-ssl-mgr.sh`
 
 ---
 
-**Last Updated**: 2025-11-15
-**Current Version**: 1.0 (Bash)
-**Target Version**: 2.0 (Rust - planned)
+**Last Updated**: 2025-01-21
+**Current Version**: 2.0.0 (Rust)
+**Target Version**: 2.1.0 (Certificate lifecycle management)
