@@ -4,6 +4,7 @@ A powerful, secure certificate management tool for homestead/homelab internal PK
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://github.com/ethanbissbort/flux-ssl-mgr/actions/workflows/rust.yml/badge.svg)](https://github.com/ethanbissbort/flux-ssl-mgr/actions/workflows/rust.yml)
 
 ## Overview
 
