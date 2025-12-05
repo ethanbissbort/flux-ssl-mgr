@@ -186,6 +186,11 @@ impl WebError {
             message,
         )
     }
+
+    /// Get the HTTP status code
+    pub fn status_code(&self) -> u16 {
+        self.status.as_u16()
+    }
 }
 
 impl IntoResponse for WebError {
