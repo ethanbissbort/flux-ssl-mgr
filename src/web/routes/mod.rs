@@ -1,6 +1,7 @@
 use axum::{
     routing::{get, post},
     Router, Json,
+    response::Html,
 };
 use std::sync::Arc;
 use tower_http::services::ServeDir;
@@ -9,6 +10,23 @@ use crate::config::Config;
 
 use super::handlers;
 use super::models::HealthResponse;
+
+// Simple HTML page handlers
+async fn serve_index() -> Html<&'static str> {
+    Html(include_str!("../../../templates/index.html"))
+}
+
+async fn serve_csr_upload() -> Html<&'static str> {
+    Html(include_str!("../../../templates/csr-upload.html"))
+}
+
+async fn serve_cert_generate() -> Html<&'static str> {
+    Html(include_str!("../../../templates/cert-generate.html"))
+}
+
+async fn serve_cert_info() -> Html<&'static str> {
+    Html(include_str!("../../../templates/cert-info.html"))
+}
 
 /// Health check endpoint
 async fn health_check() -> Json<HealthResponse> {
@@ -44,6 +62,9 @@ pub fn create_router(config: Arc<Config>) -> Router {
         .nest("/api", api_routes)
         // Serve static files from the static directory
         .nest_service("/static", ServeDir::new("static"))
-        // TODO: Add web UI routes (HTML pages)
-        .route("/", get(|| async { "Flux SSL Manager Web Service" }))
+        // Web UI routes (HTML pages)
+        .route("/", get(serve_index))
+        .route("/csr-upload", get(serve_csr_upload))
+        .route("/cert-generate", get(serve_cert_generate))
+        .route("/cert-info", get(serve_cert_info))
 }
