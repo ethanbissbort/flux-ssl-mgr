@@ -100,6 +100,18 @@ enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+
+    /// Start web service (requires 'web' feature)
+    #[cfg(feature = "web")]
+    Serve {
+        /// Bind address
+        #[arg(short, long, default_value = "127.0.0.1")]
+        bind: String,
+
+        /// Port number
+        #[arg(short, long, default_value = "8443")]
+        port: u16,
+    },
 }
 
 fn main() {
@@ -155,6 +167,10 @@ fn run() -> Result<()> {
         }
         Commands::Config { init, show, output: output_path } => {
             handle_config(init, show, output_path, config)
+        }
+        #[cfg(feature = "web")]
+        Commands::Serve { bind, port } => {
+            handle_serve(bind, port, config)
         }
     }
 }
@@ -362,4 +378,27 @@ fn handle_config(init: bool, show: bool, output_path: Option<PathBuf>, config: C
     println!("Use --show to display current configuration");
 
     Ok(())
+}
+
+#[cfg(feature = "web")]
+fn handle_serve(bind: String, port: u16, config: Config) -> Result<()> {
+    use flux_ssl_mgr::web::{start_server, ServerConfig};
+    use std::sync::Arc;
+
+    println!("Starting Flux SSL Manager web service...");
+    println!("Bind address: {}:{}", bind, port);
+
+    let server_config = ServerConfig {
+        bind_address: bind,
+        port,
+    };
+
+    // Create a tokio runtime
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|e| FluxError::IoError(e))?;
+
+    // Run the server
+    runtime.block_on(async {
+        start_server(Arc::new(config), server_config).await
+    })
 }

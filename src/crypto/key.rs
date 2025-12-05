@@ -44,6 +44,18 @@ pub fn save_private_key<P: AsRef<Path>>(
     Ok(())
 }
 
+/// Convert private key to PEM bytes (unencrypted)
+pub fn to_pem(key: &PKey<openssl::pkey::Private>) -> Result<Vec<u8>> {
+    key.private_key_to_pem_pkcs8()
+        .map_err(|e| FluxError::KeyGenerationFailed(e.to_string()))
+}
+
+/// Convert private key to encrypted PEM bytes
+pub fn to_encrypted_pem(key: &PKey<openssl::pkey::Private>, password: &Secret<String>) -> Result<Vec<u8>> {
+    key.private_key_to_pem_pkcs8_passphrase(Cipher::aes_256_cbc(), password.expose_secret().as_bytes())
+        .map_err(|e| FluxError::KeyGenerationFailed(e.to_string()))
+}
+
 /// Load private key from file
 pub fn load_private_key<P: AsRef<Path>>(
     path: P,

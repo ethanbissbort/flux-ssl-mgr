@@ -10,6 +10,9 @@ pub mod batch;
 pub mod interactive;
 pub mod output;
 
+#[cfg(feature = "web")]
+pub mod web;
+
 pub use config::Config;
 pub use error::{FluxError, Result};
 pub use ca::IntermediateCA;

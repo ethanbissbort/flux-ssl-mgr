@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generate Certificate - Flux SSL Manager</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔐 Flux SSL Manager</h1>
+            <p class="subtitle">Generate New Certificate</p>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/csr-upload">Upload CSR</a>
+                <a href="/cert-generate" class="active">Generate Certificate</a>
+                <a href="/cert-info">Certificate Info</a>
+            </nav>
+        </header>
+
+        <main>
+            <div class="form-container">
+                <h2>Generate New Certificate</h2>
+                <p class="help-text">Create a new certificate with a private key. The certificate and private key will be generated and signed by the CA.</p>
+
+                <form id="cert-generate-form">
+                    <div class="form-section">
+                        <h3>Certificate Details</h3>
+
+                        <div class="form-group">
+                            <label for="common-name">Common Name (CN) *</label>
+                            <input type="text" id="common-name" name="common_name"
+                                   placeholder="example.com" required>
+                            <small>Usually your domain name or hostname</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="sans">Subject Alternative Names (SANs)</label>
+                            <div class="san-input-group">
+                                <input type="text" id="san-input" placeholder="DNS:www.example.com or IP:192.168.1.100">
+                                <button type="button" class="btn btn-small" id="add-san">Add</button>
+                            </div>
+                            <small>Format: DNS:hostname or IP:address</small>
+                            <ul id="san-list" class="tag-list"></ul>
+                            <input type="hidden" id="sans" name="sans" value="[]">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="validity-days">Validity Period (days) *</label>
+                            <input type="number" id="validity-days" name="validity_days"
+                                   min="1" max="825" value="365" required>
+                            <small>Maximum 825 days (CA/Browser Forum requirement)</small>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h3>Key Settings</h3>
+
+                        <div class="form-group">
+                            <label for="key-size">Key Size *</label>
+                            <select id="key-size" name="key_size" required>
+                                <option value="2048">2048 bits (Faster)</option>
+                                <option value="4096" selected>4096 bits (More Secure)</option>
+                            </select>
+                            <small>4096 bits recommended for production use</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="password-protect" name="password_protect">
+                                Password protect private key
+                            </label>
+                        </div>
+
+                        <div class="form-group" id="password-group" style="display: none;">
+                            <label for="key-password">Private Key Password *</label>
+                            <input type="password" id="key-password" name="key_password"
+                                   minlength="8" autocomplete="new-password">
+                            <small>Minimum 8 characters. Store securely!</small>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary" id="submit-btn">
+                            <span class="btn-text">Generate Certificate</span>
+                            <span class="spinner" style="display: none;"></span>
+                        </button>
+                        <a href="/" class="btn btn-secondary">Cancel</a>
+                    </div>
+                </form>
+
+                <div id="result-container" style="display: none;">
+                    <div class="alert alert-success">
+                        <h3>✓ Certificate Generated Successfully</h3>
+                        <p class="warning-text">⚠️ Save the private key securely! It cannot be recovered.</p>
+                    </div>
+
+                    <div class="cert-details">
+                        <h3>Certificate Information</h3>
+                        <dl>
+                            <dt>Subject:</dt>
+                            <dd id="cert-subject"></dd>
+
+                            <dt>Serial Number:</dt>
+                            <dd id="cert-serial"></dd>
+
+                            <dt>Valid From:</dt>
+                            <dd id="cert-not-before"></dd>
+
+                            <dt>Valid Until:</dt>
+                            <dd id="cert-not-after"></dd>
+
+                            <dt>Subject Alternative Names:</dt>
+                            <dd id="cert-sans"></dd>
+                        </dl>
+                    </div>
+
+                    <div class="cert-download">
+                        <h3>Download Certificate & Key</h3>
+                        <div class="download-buttons">
+                            <button type="button" class="btn btn-primary" id="download-cert">Download Certificate</button>
+                            <button type="button" class="btn btn-primary" id="download-key">Download Private Key</button>
+                            <button type="button" class="btn" id="download-chain" style="display: none;">Download CA Chain</button>
+                        </div>
+
+                        <div class="pem-sections">
+                            <div class="pem-section">
+                                <h4>Certificate PEM:</h4>
+                                <textarea id="cert-pem" readonly></textarea>
+                                <button type="button" class="btn btn-small" id="copy-cert">Copy</button>
+                            </div>
+
+                            <div class="pem-section">
+                                <h4>Private Key PEM:</h4>
+                                <textarea id="key-pem" readonly></textarea>
+                                <button type="button" class="btn btn-small" id="copy-key">Copy</button>
+                            </div>
+
+                            <div class="pem-section" id="chain-section" style="display: none;">
+                                <h4>CA Chain PEM:</h4>
+                                <textarea id="chain-pem" readonly></textarea>
+                                <button type="button" class="btn btn-small" id="copy-chain">Copy</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-primary" id="generate-another">Generate Another Certificate</button>
+                        <a href="/" class="btn">Back to Home</a>
+                    </div>
+                </div>
+
+                <div id="error-container" style="display: none;">
+                    <div class="alert alert-error">
+                        <h3>✗ Error</h3>
+                        <p id="error-message"></p>
+                    </div>
+                    <button type="button" class="btn" id="try-again">Try Again</button>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>Flux SSL Manager - Secure Certificate Management</p>
+        </footer>
+    </div>
+
+    <script src="/static/js/cert-generate.js"></script>
+</body>
+</html>

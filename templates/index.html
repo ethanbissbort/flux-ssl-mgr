@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flux SSL Manager - Web Interface</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔐 Flux SSL Manager</h1>
+            <p class="subtitle">Certificate Management for Homelab PKI</p>
+            <nav>
+                <a href="/" class="active">Home</a>
+                <a href="/csr-upload">Upload CSR</a>
+                <a href="/cert-generate">Generate Certificate</a>
+                <a href="/cert-info">Certificate Info</a>
+            </nav>
+        </header>
+
+        <main>
+            <div class="features">
+                <div class="feature-card">
+                    <h2>📤 Upload CSR</h2>
+                    <p>Upload a Certificate Signing Request and receive a signed certificate.</p>
+                    <a href="/csr-upload" class="btn btn-primary">Upload CSR</a>
+                </div>
+
+                <div class="feature-card">
+                    <h2>🆕 Generate Certificate</h2>
+                    <p>Create a new certificate with custom parameters and download the certificate bundle.</p>
+                    <a href="/cert-generate" class="btn btn-primary">Generate Certificate</a>
+                </div>
+
+                <div class="feature-card">
+                    <h2>🔍 Certificate Info</h2>
+                    <p>Upload a certificate to view detailed information including expiration and SANs.</p>
+                    <a href="/cert-info" class="btn btn-primary">View Certificate Info</a>
+                </div>
+            </div>
+
+            <div class="api-section">
+                <h2>API Endpoints</h2>
+                <ul class="api-list">
+                    <li>
+                        <code>POST /api/csr/upload</code> - Upload and sign CSR
+                    </li>
+                    <li>
+                        <code>POST /api/cert/generate</code> - Generate new certificate
+                    </li>
+                    <li>
+                        <code>POST /api/cert/info</code> - View certificate information
+                    </li>
+                    <li>
+                        <code>GET /api/health</code> - Health check
+                    </li>
+                </ul>
+            </div>
+
+            <div class="status">
+                <p>🟢 Service Status: <strong>Active</strong></p>
+                <p>Version: {{ version }}</p>
+            </div>
+        </main>
+
+        <footer>
+            <p>Flux SSL Manager - Secure Certificate Management</p>
+            <p><a href="https://github.com/ethanbissbort/flux-ssl-mgr" target="_blank">View on GitHub</a></p>
+        </footer>
+    </div>
+</body>
+</html>

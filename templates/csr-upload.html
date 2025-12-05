@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload CSR - Flux SSL Manager</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔐 Flux SSL Manager</h1>
+            <p class="subtitle">Upload Certificate Signing Request</p>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/csr-upload" class="active">Upload CSR</a>
+                <a href="/cert-generate">Generate Certificate</a>
+                <a href="/cert-info">Certificate Info</a>
+            </nav>
+        </header>
+
+        <main>
+            <div class="form-container">
+                <h2>Upload CSR for Signing</h2>
+                <p class="help-text">Upload a Certificate Signing Request (CSR) file to have it signed by the Certificate Authority.</p>
+
+                <form id="csr-upload-form" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label for="csr-file">CSR File</label>
+                        <div class="file-upload-area" id="csr-drop-zone">
+                            <input type="file" id="csr-file" name="csr_file" accept=".csr,.pem,.txt" required>
+                            <div class="upload-placeholder">
+                                <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="17 8 12 3 7 8"></polyline>
+                                    <line x1="12" y1="3" x2="12" y2="15"></line>
+                                </svg>
+                                <p><strong>Drop CSR file here</strong> or click to browse</p>
+                                <p class="file-requirements">Supported formats: .csr, .pem (max 1MB)</p>
+                            </div>
+                            <div class="file-info" id="file-info" style="display: none;">
+                                <p class="file-name"></p>
+                                <p class="file-size"></p>
+                                <button type="button" class="btn-remove" id="remove-file">Remove</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="validity-days">Validity Period (days)</label>
+                        <input type="number" id="validity-days" name="validity_days" min="1" max="825" value="365" required>
+                        <small>Maximum 825 days as per CA/Browser Forum baseline requirements</small>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary" id="submit-btn">
+                            <span class="btn-text">Sign Certificate</span>
+                            <span class="spinner" style="display: none;"></span>
+                        </button>
+                        <a href="/" class="btn btn-secondary">Cancel</a>
+                    </div>
+                </form>
+
+                <div id="result-container" style="display: none;">
+                    <div class="alert alert-success">
+                        <h3>✓ Certificate Signed Successfully</h3>
+                    </div>
+
+                    <div class="cert-details">
+                        <h3>Certificate Information</h3>
+                        <dl>
+                            <dt>Subject:</dt>
+                            <dd id="cert-subject"></dd>
+
+                            <dt>Serial Number:</dt>
+                            <dd id="cert-serial"></dd>
+
+                            <dt>Valid From:</dt>
+                            <dd id="cert-not-before"></dd>
+
+                            <dt>Valid Until:</dt>
+                            <dd id="cert-not-after"></dd>
+
+                            <dt>Subject Alternative Names:</dt>
+                            <dd id="cert-sans"></dd>
+                        </dl>
+                    </div>
+
+                    <div class="cert-download">
+                        <h3>Download Certificate</h3>
+                        <button type="button" class="btn btn-primary" id="download-cert">Download Certificate (PEM)</button>
+                        <button type="button" class="btn" id="copy-cert">Copy to Clipboard</button>
+
+                        <div class="cert-pem-container">
+                            <h4>Certificate PEM:</h4>
+                            <textarea id="cert-pem" readonly></textarea>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-primary" id="sign-another">Sign Another CSR</button>
+                        <a href="/" class="btn">Back to Home</a>
+                    </div>
+                </div>
+
+                <div id="error-container" style="display: none;">
+                    <div class="alert alert-error">
+                        <h3>✗ Error</h3>
+                        <p id="error-message"></p>
+                    </div>
+                    <button type="button" class="btn" id="try-again">Try Again</button>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>Flux SSL Manager - Secure Certificate Management</p>
+        </footer>
+    </div>
+
+    <script src="/static/js/csr-upload.js"></script>
+</body>
+</html>

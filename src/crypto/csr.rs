@@ -132,10 +132,14 @@ pub fn load_csr<P: AsRef<Path>>(path: P) -> Result<X509Req> {
             e.to_string()
         ))?;
 
-    let csr = X509Req::from_pem(&pem_bytes)
-        .map_err(|_e| FluxError::CsrReadFailed(path.as_ref().to_path_buf()))?;
+    from_pem_bytes(&pem_bytes)
+}
 
-    Ok(csr)
+/// Load CSR from PEM bytes
+pub fn from_pem_bytes(pem_bytes: &[u8]) -> Result<X509Req> {
+    X509Req::from_pem(pem_bytes)
+        .map_err(|e| FluxError::CsrReadFailed(std::path::PathBuf::from("<bytes>"))
+            .into()) // Convert to FluxError
 }
 
 /// Get subject from CSR
