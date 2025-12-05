@@ -98,9 +98,8 @@ pub async fn handle_certificate_generate(
     let cert_pem = crypto::cert_to_pem(&cert)
         .map_err(|e| WebError::internal_error(format!("Failed to convert cert to PEM: {}", e)))?;
 
-    // TODO: Load CA chain from config
-    // For now, we'll leave it as None
-    let ca_chain = None;
+    // Load CA chain (intermediate + root CA)
+    let ca_chain = build_ca_chain(&config, &ca).ok();
 
     let response = CertificateGenerateResponse {
         success: true,
@@ -113,9 +112,43 @@ pub async fn handle_certificate_generate(
             not_before: cert_info.not_before,
             not_after: cert_info.not_after,
             sans: cert_info.sans,
-            download_url: None, // TODO: Implement download functionality
+            download_url: None, // API returns PEM data directly; clients can save locally
         },
     };
 
     Ok(Json(response))
+}
+
+/// Build CA certificate chain (intermediate + root)
+fn build_ca_chain(config: &Config, ca: &IntermediateCA) -> std::result::Result<String, WebError> {
+    let mut chain = String::new();
+
+    // Add intermediate CA certificate
+    let intermediate_pem = crypto::cert_to_pem(ca.cert())
+        .map_err(|e| WebError::internal_error(format!("Failed to convert intermediate cert: {}", e)))?;
+    chain.push_str(&String::from_utf8_lossy(&intermediate_pem));
+
+    // Try to load root CA certificate
+    // Standard PKI structure places root CA at /root/ca/certs/ca.cert.pem
+    let root_ca_path = config.working_dir.join("certs").join("ca.cert.pem");
+
+    if root_ca_path.exists() {
+        debug!("Loading root CA from {:?}", root_ca_path);
+        match crypto::load_cert(&root_ca_path) {
+            Ok(root_cert) => {
+                let root_pem = crypto::cert_to_pem(&root_cert)
+                    .map_err(|e| WebError::internal_error(format!("Failed to convert root cert: {}", e)))?;
+                chain.push_str(&String::from_utf8_lossy(&root_pem));
+                debug!("Root CA added to chain");
+            }
+            Err(e) => {
+                debug!("Failed to load root CA: {}", e);
+                // Continue without root CA
+            }
+        }
+    } else {
+        debug!("Root CA not found at {:?}, chain will only contain intermediate", root_ca_path);
+    }
+
+    Ok(chain)
 }

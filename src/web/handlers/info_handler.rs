@@ -192,12 +192,75 @@ fn extract_public_key_info(cert: &X509) -> Result<PublicKeyInfo, WebError> {
 }
 
 /// Extract certificate extensions
-fn extract_extensions(_cert: &X509) -> Vec<ExtensionInfo> {
-    let extensions = Vec::new();
+fn extract_extensions(cert: &X509) -> Vec<ExtensionInfo> {
+    let mut extensions = Vec::new();
 
-    // Note: X509::extensions() is not available in all openssl versions
-    // For now, return empty vector - can be enhanced later
-    // TODO: Extract extensions using subject_alt_names() and other specific methods
+    // Extract Subject Alternative Names
+    if let Some(san_ext) = cert.subject_alt_names() {
+        let mut sans = Vec::new();
+        for san in san_ext {
+            if let Some(dns) = san.dnsname() {
+                sans.push(format!("DNS:{}", dns));
+            }
+            if let Some(ip) = san.ipaddress() {
+                let ip_str = ip.iter()
+                    .map(|b| b.to_string())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                sans.push(format!("IP:{}", ip_str));
+            }
+            if let Some(email) = san.email() {
+                sans.push(format!("EMAIL:{}", email));
+            }
+        }
+
+        if !sans.is_empty() {
+            extensions.push(ExtensionInfo {
+                oid: "2.5.29.17".to_string(),
+                name: "Subject Alternative Name".to_string(),
+                critical: false,
+                value: sans.join(", "),
+            });
+        }
+    }
+
+    // Extract Authority Key Identifier
+    if let Some(aki) = cert.authority_key_id() {
+        let keyid = aki.as_slice()
+            .iter()
+            .map(|b| format!("{:02X}", b))
+            .collect::<Vec<_>>()
+            .join(":");
+
+        extensions.push(ExtensionInfo {
+            oid: "2.5.29.35".to_string(),
+            name: "Authority Key Identifier".to_string(),
+            critical: false,
+            value: format!("keyid:{}", keyid),
+        });
+    }
+
+    // Extract Subject Key Identifier
+    if let Some(ski) = cert.subject_key_id() {
+        let keyid = ski.as_slice()
+            .iter()
+            .map(|b| format!("{:02X}", b))
+            .collect::<Vec<_>>()
+            .join(":");
+
+        extensions.push(ExtensionInfo {
+            oid: "2.5.29.14".to_string(),
+            name: "Subject Key Identifier".to_string(),
+            critical: false,
+            value: keyid,
+        });
+    }
+
+    // Note: OpenSSL version in use doesn't expose direct methods for
+    // Basic Constraints, Key Usage, Extended Key Usage extraction.
+    // These would require parsing the extension stack directly which is
+    // version-dependent. The above extensions cover the most critical
+    // certificate information for web service use.
 
     extensions
 }
