@@ -684,9 +684,515 @@ cargo fmt
 cargo fmt --check
 ```
 
+## Web Service Architecture (v2.5+)
+
+### Overview
+
+Starting with v2.5, Flux SSL Manager includes a web-based interface for certificate management operations. This provides a user-friendly alternative to the CLI, making certificate operations accessible through a browser.
+
+See [web-roadmap.md](web-roadmap.md) for comprehensive web service implementation details.
+
+### Web Service Components
+
+#### Project Structure
+
+```
+src/web/
+├── mod.rs              # Web module exports
+├── server.rs           # Axum server setup and configuration
+├── routes/             # Route definitions
+│   ├── mod.rs
+│   ├── api.rs          # API routes (/api/*)
+│   ├── csr.rs          # CSR upload endpoints
+│   ├── cert.rs         # Certificate generation endpoints
+│   └── info.rs         # Certificate info endpoints
+├── handlers/           # Request handlers (business logic)
+│   ├── mod.rs
+│   ├── csr_handler.rs  # CSR upload and signing
+│   ├── cert_handler.rs # Manual certificate generation
+│   └── info_handler.rs # Certificate information display
+├── models/             # Request/response models
+│   ├── mod.rs
+│   ├── requests.rs     # API request types
+│   ├── responses.rs    # API response types
+│   └── errors.rs       # Error response models
+├── middleware/         # Custom middleware
+│   ├── mod.rs
+│   ├── auth.rs         # Authentication middleware
+│   ├── logging.rs      # Request logging
+│   └── cors.rs         # CORS handling
+└── templates/          # HTML templates (Askama)
+    ├── base.html       # Base template
+    ├── index.html      # Landing page
+    ├── csr_upload.html # CSR upload interface
+    ├── cert_request.html # Manual cert request form
+    └── cert_info.html  # Certificate viewer
+
+static/                 # Static web assets
+├── css/
+│   └── styles.css     # Main stylesheet
+├── js/
+│   └── app.js         # Frontend JavaScript
+└── images/            # Images and icons
+```
+
+#### Technology Stack
+
+**Backend:**
+- **axum** - Web framework (type-safe, composable, tokio-based)
+- **tokio** - Async runtime
+- **tower** - Middleware and service composition
+- **tower-http** - HTTP-specific middleware (CORS, compression, etc.)
+- **askama** - Type-safe templating engine
+- **multer** - Multipart form data parsing
+- **serde_json** - JSON serialization
+- **validator** - Input validation
+
+**Frontend:**
+- HTML5/CSS3/JavaScript (initial implementation)
+- Potential future migration to React/Vue/Svelte
+- Responsive design (mobile-friendly)
+- Progressive enhancement approach
+
+**Security:**
+- **argon2** - Password hashing
+- **jsonwebtoken** - JWT authentication
+- **tower-sessions** - Session management
+- HTTPS/TLS support with rustls or openssl
+
+### Core Features
+
+#### 1. CSR Upload & Signing
+
+**Endpoint**: `POST /api/csr/upload`
+
+Accepts CSR file uploads and returns signed certificates.
+
+**Request:**
+```json
+{
+  "csr_file": "multipart/form-data",
+  "sans": ["DNS:example.com", "IP:192.168.1.1"],
+  "validity_days": 375
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "certificate": {
+    "pem": "-----BEGIN CERTIFICATE-----...",
+    "subject": "CN=example.com",
+    "serial": "0A1B2C3D",
+    "not_before": "2025-12-05T00:00:00Z",
+    "not_after": "2026-12-05T23:59:59Z",
+    "sans": ["DNS:example.com"]
+  }
+}
+```
+
+**Implementation:**
+- Reuses existing `crypto::csr` module for CSR parsing
+- Integrates with `ca::intermediate` for signing
+- Validates CSR format and signature
+- Supports additional SANs via form input
+
+#### 2. Manual Certificate Request
+
+**Endpoint**: `POST /api/cert/generate`
+
+Interactive form for certificate generation without pre-existing CSR.
+
+**Request:**
+```json
+{
+  "common_name": "example.com",
+  "sans": ["DNS:www.example.com", "IP:192.168.1.100"],
+  "validity_days": 375,
+  "key_size": 4096,
+  "password_protect": false,
+  "key_password": null
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "certificate": {
+    "pem": "-----BEGIN CERTIFICATE-----...",
+    "private_key": "-----BEGIN PRIVATE KEY-----...",
+    "ca_chain": "-----BEGIN CERTIFICATE-----...",
+    "download_url": "/api/cert/download/SESSION_ID"
+  }
+}
+```
+
+**Implementation:**
+- Generates RSA/ECDSA key pairs using `crypto::key`
+- Creates CSR with specified SANs using `crypto::csr`
+- Signs certificate with CA using `crypto::cert`
+- Creates downloadable ZIP bundle
+- Optionally password-protects private key
+
+#### 3. Certificate Information Display
+
+**Endpoint**: `POST /api/cert/info`
+
+Upload certificate files to view detailed information.
+
+**Request:**
+```json
+{
+  "cert_file": "multipart/form-data",
+  "verify_chain": true
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "certificate": {
+    "version": 3,
+    "serial_number": "0A1B2C3D4E5F",
+    "signature_algorithm": "sha256WithRSAEncryption",
+    "issuer": { "CN": "Intermediate CA" },
+    "validity": {
+      "not_before": "2025-12-05T00:00:00Z",
+      "not_after": "2026-12-05T23:59:59Z",
+      "days_remaining": 365,
+      "is_expired": false
+    },
+    "subject": { "CN": "example.com" },
+    "subject_alternative_names": ["DNS:example.com"],
+    "public_key": {
+      "algorithm": "RSA",
+      "size": 4096
+    },
+    "fingerprints": {
+      "sha1": "A1:B2:C3:...",
+      "sha256": "1A2B3C4D..."
+    }
+  }
+}
+```
+
+**Implementation:**
+- Parses certificates using OpenSSL
+- Extracts and formats all certificate information
+- Validates certificate chains
+- Checks expiration status
+- Calculates fingerprints
+
+### Web Service Configuration
+
+Add to `config.toml`:
+
+```toml
+[web]
+enabled = false           # Enable web service
+bind_address = "127.0.0.1"
+port = 8443
+tls_enabled = true
+tls_cert_path = "/path/to/server.cert.pem"
+tls_key_path = "/path/to/server.key.pem"
+workers = 4
+request_timeout = 30      # seconds
+max_request_size = 10485760  # 10MB
+
+[web.auth]
+enabled = false           # Enable authentication
+jwt_secret = "change-me"
+session_timeout = 3600    # 1 hour
+require_https = true
+
+[web.limits]
+rate_limit = 100          # requests per minute
+max_file_size = 5242880   # 5MB
+max_concurrent_uploads = 10
+
+[web.cors]
+enabled = true
+allowed_origins = ["https://example.com"]
+allowed_methods = ["GET", "POST"]
+
+[web.logging]
+access_log = "/var/log/flux-ssl-mgr/access.log"
+audit_log = "/var/log/flux-ssl-mgr/audit.log"
+log_level = "info"
+```
+
+### Security Considerations
+
+#### Input Validation
+- All user inputs validated before processing
+- File uploads restricted by size and type
+- Magic number verification for file types
+- Path traversal prevention
+- SAN format validation
+
+#### Authentication & Authorization
+- Optional authentication system (JWT-based)
+- API key support for automation
+- Role-based access control (RBAC)
+- CSRF protection for web forms
+- Secure session management
+
+#### Network Security
+- HTTPS/TLS enforcement (configurable)
+- Secure headers (CSP, HSTS, X-Frame-Options)
+- CORS configuration
+- Rate limiting per IP
+- Request size limits
+
+#### Data Protection
+- Temporary file cleanup (RAII)
+- Secure memory handling for keys
+- Audit logging for all operations
+- No sensitive data in logs
+- Certificate data encryption at rest (optional)
+
+### API Error Handling
+
+Consistent error response format following RFC 7807:
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "INVALID_CSR",
+    "message": "CSR validation failed",
+    "details": "Invalid signature",
+    "request_id": "req_123456"
+  }
+}
+```
+
+**Error Codes:**
+- `INVALID_CSR` - CSR validation failed
+- `INVALID_INPUT` - Input validation failed
+- `FILE_TOO_LARGE` - File exceeds size limit
+- `UNSUPPORTED_FORMAT` - Unsupported file format
+- `CA_ERROR` - CA operation failed
+- `SIGNING_FAILED` - Certificate signing failed
+- `UNAUTHORIZED` - Authentication required
+- `FORBIDDEN` - Insufficient permissions
+- `INTERNAL_ERROR` - Internal server error
+
+### Usage Examples
+
+#### Start Web Service
+
+```bash
+# Start web service with default config
+flux-ssl-mgr serve
+
+# Start with custom config
+flux-ssl-mgr serve --config /etc/flux-ssl-mgr/config.toml
+
+# Start with custom port
+flux-ssl-mgr serve --port 8080 --bind 0.0.0.0
+
+# Start without TLS (development only)
+flux-ssl-mgr serve --no-tls
+```
+
+#### API Usage with cURL
+
+**Upload CSR:**
+```bash
+curl -X POST https://localhost:8443/api/csr/upload \
+  -F "csr_file=@example.csr.pem" \
+  -F "sans=DNS:www.example.com,IP:192.168.1.1" \
+  -F "validity_days=375"
+```
+
+**Generate Certificate:**
+```bash
+curl -X POST https://localhost:8443/api/cert/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "common_name": "example.com",
+    "sans": ["DNS:www.example.com"],
+    "validity_days": 375,
+    "key_size": 4096
+  }'
+```
+
+**View Certificate Info:**
+```bash
+curl -X POST https://localhost:8443/api/cert/info \
+  -F "cert_file=@example.cert.pem"
+```
+
+### Testing Web Service
+
+```bash
+# Run all web tests
+cargo test --features web
+
+# Run specific web module tests
+cargo test --test web_integration
+
+# Run with logging
+RUST_LOG=debug cargo test --features web
+
+# Test API endpoints
+cargo test api::tests
+```
+
+### Deployment
+
+#### Systemd Service
+
+```bash
+# Install and enable service
+sudo cp flux-ssl-mgr.service /etc/systemd/system/
+sudo systemctl enable flux-ssl-mgr
+sudo systemctl start flux-ssl-mgr
+
+# Check status
+sudo systemctl status flux-ssl-mgr
+
+# View logs
+sudo journalctl -u flux-ssl-mgr -f
+```
+
+#### Docker
+
+```bash
+# Build image
+docker build -t flux-ssl-mgr:latest .
+
+# Run container
+docker run -d \
+  -p 8443:8443 \
+  -v /path/to/ca:/root/ca:ro \
+  -v /path/to/config.toml:/etc/flux-ssl-mgr/config.toml:ro \
+  --name flux-ssl-mgr \
+  flux-ssl-mgr:latest
+```
+
+#### Reverse Proxy (Nginx)
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name cert-manager.example.com;
+
+    ssl_certificate /etc/ssl/certs/cert-manager.crt;
+    ssl_certificate_key /etc/ssl/private/cert-manager.key;
+
+    location / {
+        proxy_pass https://127.0.0.1:8443;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+}
+```
+
+### Web Service Dependencies
+
+Additional dependencies for web service:
+
+```toml
+[dependencies]
+# Web framework
+axum = { version = "0.7", features = ["multipart", "ws"] }
+tokio = { version = "1.35", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["fs", "cors", "compression-gzip"] }
+
+# Templates
+askama = "0.12"
+askama_axum = "0.4"
+
+# Multipart forms
+multer = "3.0"
+
+# Authentication
+jsonwebtoken = "9.2"
+argon2 = "0.5"
+
+# Sessions
+tower-sessions = "0.9"
+
+# Validation
+validator = { version = "0.17", features = ["derive"] }
+
+# API documentation
+utoipa = { version = "4.1", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
+```
+
+### Instructions for Claude/AI Assistants - Web Service
+
+When working on the web service:
+
+1. **Understanding Web Architecture**
+   - Start with `src/web/mod.rs` for module overview
+   - Review `src/web/server.rs` for server setup
+   - Check route definitions in `src/web/routes/`
+   - Understand handlers in `src/web/handlers/`
+
+2. **Adding New Endpoints**
+   - Define request/response models in `src/web/models/`
+   - Implement handler logic in appropriate handler module
+   - Add route in `src/web/routes/`
+   - Update OpenAPI documentation
+   - Write tests in `tests/web/`
+
+3. **Security Checklist**
+   - [ ] Input validation implemented
+   - [ ] Authentication/authorization checked
+   - [ ] CSRF protection (for forms)
+   - [ ] Rate limiting applied
+   - [ ] File upload restrictions
+   - [ ] Error messages don't leak sensitive info
+   - [ ] Audit logging enabled
+
+4. **Testing Requirements**
+   - Unit tests for handlers
+   - Integration tests for endpoints
+   - Security tests for auth/validation
+   - Error case coverage
+   - Load testing for performance
+
+5. **Common Tasks**
+
+   **Add New API Endpoint:**
+   1. Define request/response models
+   2. Implement handler function
+   3. Add route to router
+   4. Add middleware (auth, validation)
+   5. Write unit tests
+   6. Update OpenAPI spec
+   7. Document in web-roadmap.md
+
+   **Add Authentication:**
+   1. Implement JWT token generation
+   2. Create auth middleware
+   3. Add login/logout endpoints
+   4. Protect routes with middleware
+   5. Add user session management
+   6. Test auth flows
+
+   **Improve UI:**
+   1. Update templates in `templates/`
+   2. Enhance CSS in `static/css/`
+   3. Add JavaScript in `static/js/`
+   4. Test responsiveness
+   5. Check accessibility
+
 ## Future Enhancements
 
 See [ROADMAP.md](ROADMAP.md) for comprehensive future plans.
+See [web-roadmap.md](web-roadmap.md) for web service implementation details.
 
 ### Short-term (v2.1)
 - Complete test coverage (unit + integration)
@@ -703,14 +1209,16 @@ See [ROADMAP.md](ROADMAP.md) for comprehensive future plans.
 - Certificate search and filtering
 - Automated backup/restore
 - REST API for automation
+- **Web service implementation (v2.5)** - See web-roadmap.md
 
 ### Long-term (v3.0+)
 - ACME protocol support (Let's Encrypt)
-- Web UI for certificate management
+- Enhanced web UI with modern framework (React/Vue)
 - Hardware Security Module (HSM) support
 - Certificate monitoring and alerting
 - Integration with service discovery (Consul, etcd)
 - Plugin system for extensions
+- Mobile app (PWA)
 
 ## Contributing
 

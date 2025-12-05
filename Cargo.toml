@@ -23,6 +23,7 @@ openssl = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 config = "0.14"
+serde_json = "1.0"
 
 # Error Handling
 thiserror = "1.0"
@@ -37,12 +38,28 @@ walkdir = "2.4"
 tempfile = "3.8"
 
 # Utilities
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Async/Concurrency
 rayon = "1.8"
+
+# Web Service (optional, enabled with "web" feature)
+axum = { version = "0.7", features = ["multipart", "ws"], optional = true }
+tokio = { version = "1.35", features = ["full"], optional = true }
+tower = { version = "0.4", optional = true }
+tower-http = { version = "0.5", features = ["fs", "cors", "compression-gzip", "trace"], optional = true }
+askama = { version = "0.12", optional = true }
+askama_axum = { version = "0.4", optional = true }
+multer = { version = "3.0", optional = true }
+validator = { version = "0.18", features = ["derive"], optional = true }
+uuid = { version = "1.6", features = ["v4", "serde"], optional = true }
+bytes = { version = "1.5", optional = true }
+
+[features]
+default = []
+web = ["axum", "tokio", "tower", "tower-http", "askama", "askama_axum", "multer", "validator", "uuid", "bytes"]
 
 [dev-dependencies]
 assert_cmd = "2.0"
