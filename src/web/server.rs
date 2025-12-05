@@ -40,7 +40,7 @@ pub async fn start_server(
     let addr = format!("{}:{}", server_config.bind_address, server_config.port);
     let socket_addr: SocketAddr = addr
         .parse()
-        .map_err(|e| FluxError::ConfigError(format!("Invalid bind address: {}", e)))?;
+        .map_err(|e| FluxError::IoError(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("Invalid bind address: {}", e))))?;
 
     info!("Server listening on http://{}", socket_addr);
     info!("API documentation available at http://{}/api/health", socket_addr);

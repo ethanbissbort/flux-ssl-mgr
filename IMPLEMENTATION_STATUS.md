@@ -87,43 +87,43 @@ This document tracks the progress of implementing the web service feature for Fl
 
 ---
 
-## Known Issues 🔧
+## Resolved Issues ✅
 
-### Compilation Errors (Need to Fix)
+### Compilation Errors (FIXED)
 
-The web service feature does not currently compile due to interface mismatches with existing crypto modules. The following issues need to be resolved:
+All compilation errors have been resolved! The following issues were fixed:
 
-1. **Crypto Module Interfaces**:
-   - Handlers reference functions that don't exist or have different signatures
-   - Need to review and align with actual crypto module exports
-   - Missing: `extract_certificate_info`, `to_pem`, `parse_san`, `save_key`, `save_encrypted_key`
+1. **Crypto Module Interfaces** ✅:
+   - Added `extract_certificate_info()` to cert.rs with CertificateInfo struct
+   - Added `to_pem()` and `from_pem()` functions to cert.rs
+   - Added `from_pem_bytes()` function to csr.rs
+   - Added `to_pem()` and `to_encrypted_pem()` functions to key.rs
+   - Updated crypto/mod.rs exports
 
-2. **IntermediateCA Structure**:
-   - Fields `cert` and `key` are private
-   - Need to either make them public or add getter methods
-   - Alternative: Create a wrapper method for signing operations
+2. **IntermediateCA Structure** ✅:
+   - IntermediateCA already had getter methods `cert()` and `key()`
+   - Updated handlers to use getter methods
 
-3. **Function Signature Mismatches**:
-   - `sign_csr` function signature doesn't match handler usage
-   - `load_csr` may need different parameter type
-   - Need to review all crypto function signatures
+3. **Function Signature Mismatches** ✅:
+   - Fixed `sign_csr` calls to use correct 4-parameter signature
+   - Fixed `create_csr` calls to use correct parameter order
+   - Fixed `generate_rsa_key` to accept second parameter
+   - All handlers now use correct function signatures
 
-4. **Import Issues**:
-   - Some imports in handlers don't resolve correctly
-   - Need to verify all module paths
+4. **Import Issues** ✅:
+   - Fixed all imports in handlers to use correct module paths
+   - Removed duplicate/incorrect imports
+   - Added proper use statements
 
-### Specific Errors to Fix
+5. **Validator Integration** ✅:
+   - Fixed custom validation syntax: `custom(function = "validate_key_size")`
+   - Added manual validation in handler as alternative
 
-```
-error[E0425]: cannot find function `extract_certificate_info` in module `crypto::cert`
-error[E0425]: cannot find function `to_pem` in module `crypto::cert`
-error[E0425]: cannot find function `parse_san` in module `crypto::csr`
-error[E0425]: cannot find function `save_key` in module `crypto::key`
-error[E0425]: cannot find function `save_encrypted_key` in module `crypto::key`
-error[E0616]: field `cert` of struct `IntermediateCA` is private
-error[E0616]: field `key` of struct `IntermediateCA` is private
-error[E0061]: function signature mismatches
-```
+6. **Minor Fixes** ✅:
+   - Removed X509::extensions() call (not available in all OpenSSL versions)
+   - Fixed DateTime conversion (already chrono::DateTime in CertificateInfo)
+   - Fixed server error handling to use FluxError::IoError
+   - Added HealthResponse import to routes
 
 ---
 

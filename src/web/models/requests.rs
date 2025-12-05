@@ -18,7 +18,7 @@ pub struct CertificateGenerateRequest {
     pub validity_days: u32,
 
     /// RSA key size in bits
-    #[validate(custom = "validate_key_size")]
+    #[validate(custom(function = "validate_key_size"))]
     #[serde(default = "default_key_size")]
     pub key_size: u32,
 
@@ -43,9 +43,7 @@ fn validate_key_size(key_size: u32) -> Result<(), validator::ValidationError> {
     if key_size == 2048 || key_size == 4096 {
         Ok(())
     } else {
-        Err(validator::ValidationError::new(
-            "Key size must be 2048 or 4096",
-        ))
+        Err(validator::ValidationError::new("invalid_key_size"))
     }
 }
 

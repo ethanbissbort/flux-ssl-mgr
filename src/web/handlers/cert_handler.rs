@@ -1,9 +1,7 @@
 use axum::Json;
-use chrono::{DateTime, Utc};
 use secrecy::{ExposeSecret, Secret};
 use std::sync::Arc;
 use tracing::{debug, info};
-use validator::Validate;
 
 use crate::ca::IntermediateCA;
 use crate::config::Config;
@@ -23,10 +21,20 @@ pub async fn handle_certificate_generate(
         request.common_name
     );
 
-    // Validate request
-    request
-        .validate()
-        .map_err(|e| WebError::invalid_input(format!("Validation failed: {}", e)))?;
+    // Validate common name
+    if request.common_name.is_empty() {
+        return Err(WebError::invalid_input("Common name cannot be empty"));
+    }
+
+    // Validate validity days
+    if request.validity_days == 0 || request.validity_days > 825 {
+        return Err(WebError::invalid_input("Validity days must be between 1 and 825"));
+    }
+
+    // Validate key size
+    if request.key_size != 2048 && request.key_size != 4096 {
+        return Err(WebError::invalid_input("Key size must be 2048 or 4096"));
+    }
 
     // Validate password requirement
     if request.password_protect && request.key_password.is_none() {
@@ -37,7 +45,7 @@ pub async fn handle_certificate_generate(
 
     // Generate private key
     debug!("Generating RSA private key (size: {})", request.key_size);
-    let private_key = crypto::key::generate_rsa_key(request.key_size)
+    let private_key = crypto::generate_rsa_key(request.key_size, None)
         .map_err(|e| WebError::key_generation_failed(format!("Failed to generate key: {}", e)))?;
 
     // Convert key to PEM (optionally encrypted)
@@ -45,49 +53,49 @@ pub async fn handle_certificate_generate(
         let password = request.key_password.as_ref().unwrap();
         let secret = Secret::new(password.clone());
 
-        crypto::key::save_encrypted_key(&private_key, &secret).map_err(|e| {
+        crypto::key_to_encrypted_pem(&private_key, &secret).map_err(|e| {
             WebError::key_generation_failed(format!("Failed to encrypt key: {}", e))
         })?
     } else {
-        crypto::key::save_key(&private_key)
+        crypto::key_to_pem(&private_key)
             .map_err(|e| WebError::key_generation_failed(format!("Failed to save key: {}", e)))?
     };
 
     debug!("Private key generated successfully");
 
     // Parse SANs
-    let sans: Vec<crypto::csr::SanEntry> = request
+    let sans: Vec<crypto::SanEntry> = request
         .sans
         .iter()
-        .map(|s| crypto::csr::parse_san(s))
+        .map(|s| crypto::SanEntry::parse(s))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| WebError::invalid_input(format!("Invalid SAN format: {}", e)))?;
 
     // Create CSR
     debug!("Creating CSR with CN={}", request.common_name);
-    let csr = crypto::csr::create_csr(&private_key, &request.common_name, sans.clone())
+    let csr = crypto::create_csr(&request.common_name, &private_key, &sans, Some(&request.common_name))
         .map_err(|e| WebError::signing_failed(format!("Failed to create CSR: {}", e)))?;
 
     debug!("CSR created successfully");
 
     // Load CA
-    let ca = IntermediateCA::load(config.clone())
+    let ca = IntermediateCA::load(&config)
         .map_err(|e| WebError::ca_error(format!("Failed to load CA: {}", e)))?;
 
     debug!("CA loaded successfully");
 
     // Sign certificate
-    let cert = crypto::cert::sign_csr(&csr, &ca.cert, &ca.key, request.validity_days, vec![])
+    let cert = crypto::sign_csr(&csr, ca.cert(), ca.key(), request.validity_days)
         .map_err(|e| WebError::signing_failed(format!("Failed to sign certificate: {}", e)))?;
 
     info!("Certificate signed successfully");
 
     // Extract certificate information
-    let cert_info = crypto::cert::extract_certificate_info(&cert)
+    let cert_info = crypto::extract_certificate_info(&cert)
         .map_err(|e| WebError::internal_error(format!("Failed to extract cert info: {}", e)))?;
 
     // Convert certificate to PEM
-    let cert_pem = crypto::cert::to_pem(&cert)
+    let cert_pem = crypto::cert_to_pem(&cert)
         .map_err(|e| WebError::internal_error(format!("Failed to convert cert to PEM: {}", e)))?;
 
     // TODO: Load CA chain from config
@@ -102,10 +110,8 @@ pub async fn handle_certificate_generate(
             ca_chain,
             subject: cert_info.subject,
             serial: cert_info.serial_number,
-            not_before: DateTime::from_timestamp(cert_info.not_before.timestamp(), 0)
-                .unwrap_or_default(),
-            not_after: DateTime::from_timestamp(cert_info.not_after.timestamp(), 0)
-                .unwrap_or_default(),
+            not_before: cert_info.not_before,
+            not_after: cert_info.not_after,
             sans: cert_info.sans,
             download_url: None, // TODO: Implement download functionality
         },

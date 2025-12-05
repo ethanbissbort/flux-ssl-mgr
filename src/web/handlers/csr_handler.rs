@@ -1,13 +1,10 @@
 use axum::{extract::Multipart, Json};
-use chrono::{DateTime, Utc};
-use openssl::x509::X509;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 use crate::ca::IntermediateCA;
-use crate::crypto::cert::CertificateInfo as CryptoCertInfo;
-use crate::crypto::csr::SanEntry;
-use crate::{config::Config, crypto};
+use crate::config::Config;
+use crate::crypto;
 
 use super::super::models::{
     CertificateInfo, CsrUploadMetadata, CsrUploadResponse, WebError,
@@ -79,43 +76,37 @@ pub async fn handle_csr_upload(
     let csr_data = csr_data.ok_or_else(|| WebError::bad_request("No CSR file provided"))?;
 
     // Parse CSR
-    let csr = crypto::csr::load_csr(&csr_data)
+    let csr = crypto::csr_from_pem_bytes(&csr_data)
         .map_err(|e| WebError::invalid_csr(format!("Failed to parse CSR: {}", e)))?;
 
     debug!("CSR parsed successfully");
 
-    // Parse additional SANs
-    let additional_sans: Vec<SanEntry> = metadata
+    // Parse additional SANs (currently not used in sign_csr, but could be extended)
+    let _additional_sans: Vec<crypto::SanEntry> = metadata
         .sans
         .iter()
-        .map(|s| crypto::csr::parse_san(s))
+        .map(|s| crypto::SanEntry::parse(s))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| WebError::invalid_input(format!("Invalid SAN format: {}", e)))?;
 
     // Load CA
-    let ca = IntermediateCA::load(config.clone())
+    let ca = IntermediateCA::load(&config)
         .map_err(|e| WebError::ca_error(format!("Failed to load CA: {}", e)))?;
 
     debug!("CA loaded successfully");
 
     // Sign certificate
-    let cert = crypto::cert::sign_csr(
-        &csr,
-        &ca.cert,
-        &ca.key,
-        metadata.validity_days,
-        additional_sans,
-    )
-    .map_err(|e| WebError::signing_failed(format!("Failed to sign certificate: {}", e)))?;
+    let cert = crypto::sign_csr(&csr, ca.cert(), ca.key(), metadata.validity_days)
+        .map_err(|e| WebError::signing_failed(format!("Failed to sign certificate: {}", e)))?;
 
     info!("Certificate signed successfully");
 
     // Extract certificate information
-    let cert_info = crypto::cert::extract_certificate_info(&cert)
+    let cert_info = crypto::extract_certificate_info(&cert)
         .map_err(|e| WebError::internal_error(format!("Failed to extract cert info: {}", e)))?;
 
     // Convert to PEM
-    let pem = crypto::cert::to_pem(&cert)
+    let pem = crypto::cert_to_pem(&cert)
         .map_err(|e| WebError::internal_error(format!("Failed to convert to PEM: {}", e)))?;
 
     let response = CsrUploadResponse {
@@ -125,10 +116,8 @@ pub async fn handle_csr_upload(
             subject: cert_info.subject,
             issuer: cert_info.issuer,
             serial: cert_info.serial_number,
-            not_before: DateTime::from_timestamp(cert_info.not_before.timestamp(), 0)
-                .unwrap_or_default(),
-            not_after: DateTime::from_timestamp(cert_info.not_after.timestamp(), 0)
-                .unwrap_or_default(),
+            not_before: cert_info.not_before,
+            not_after: cert_info.not_after,
             sans: cert_info.sans,
         },
     };

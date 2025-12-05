@@ -1,6 +1,6 @@
 use axum::{
     routing::{get, post},
-    Router,
+    Router, Json,
 };
 use std::sync::Arc;
 use tower_http::services::ServeDir;
@@ -8,10 +8,11 @@ use tower_http::services::ServeDir;
 use crate::config::Config;
 
 use super::handlers;
+use super::models::HealthResponse;
 
 /// Health check endpoint
-async fn health_check() -> axum::Json<super::super::models::HealthResponse> {
-    axum::Json(super::super::models::HealthResponse {
+async fn health_check() -> Json<HealthResponse> {
+    Json(HealthResponse {
         status: "healthy".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
     })

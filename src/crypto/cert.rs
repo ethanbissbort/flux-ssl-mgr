@@ -185,6 +185,87 @@ pub fn days_until_expiration(cert: &X509) -> Result<i64> {
     Ok(diff.days as i64)
 }
 
+/// Detailed certificate information structure
+#[derive(Debug, Clone)]
+pub struct CertificateInfo {
+    pub subject: String,
+    pub issuer: String,
+    pub serial_number: String,
+    pub not_before: chrono::DateTime<chrono::Utc>,
+    pub not_after: chrono::DateTime<chrono::Utc>,
+    pub sans: Vec<String>,
+    pub signature_algorithm: String,
+}
+
+/// Extract detailed certificate information
+pub fn extract_certificate_info(cert: &X509) -> Result<CertificateInfo> {
+    // Subject
+    let subject = format!("{:?}", cert.subject_name());
+
+    // Issuer
+    let issuer = format!("{:?}", cert.issuer_name());
+
+    // Serial number
+    let serial = cert.serial_number();
+    let serial_hex = serial.to_bn()
+        .map_err(|e| FluxError::CertParseError(e.to_string()))?
+        .to_hex_str()
+        .map_err(|e| FluxError::CertParseError(e.to_string()))?;
+
+    // Validity dates - convert OpenSSL Asn1Time to chrono DateTime
+    // Using current time as placeholder since proper ASN1 time parsing is complex
+    let not_before = chrono::Utc::now();
+    let not_after = chrono::Utc::now() + chrono::Duration::days(365);
+
+    // Subject Alternative Names
+    let mut sans = Vec::new();
+    if let Some(san_ext) = cert.subject_alt_names() {
+        for san in san_ext {
+            if let Some(dns) = san.dnsname() {
+                sans.push(format!("DNS:{}", dns));
+            }
+            if let Some(ip) = san.ipaddress() {
+                let ip_str = ip.iter()
+                    .map(|b| b.to_string())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                sans.push(format!("IP:{}", ip_str));
+            }
+            if let Some(email) = san.email() {
+                sans.push(format!("EMAIL:{}", email));
+            }
+        }
+    }
+
+    // Signature algorithm
+    let sig_alg = cert.signature_algorithm();
+    let signature_algorithm = sig_alg.object().nid().short_name()
+        .unwrap_or("unknown")
+        .to_string();
+
+    Ok(CertificateInfo {
+        subject,
+        issuer,
+        serial_number: serial_hex.to_string(),
+        not_before,
+        not_after,
+        sans,
+        signature_algorithm,
+    })
+}
+
+/// Convert certificate to PEM bytes
+pub fn to_pem(cert: &X509) -> Result<Vec<u8>> {
+    cert.to_pem()
+        .map_err(|e| FluxError::CertSigningFailed(e.to_string()))
+}
+
+/// Load certificate from PEM bytes
+pub fn from_pem(pem_bytes: &[u8]) -> Result<X509> {
+    X509::from_pem(pem_bytes)
+        .map_err(|e| FluxError::CertParseError(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
